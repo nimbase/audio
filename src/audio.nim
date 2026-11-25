@@ -16,10 +16,12 @@ import ./audio/codecs/pcm
 import ./audio/codecs/adpcm
 import ./audio/codecs/flac
 import ./audio/codecs/vorbis
+import ./audio/codecs/mpa
 import ./audio/dsp
 import ./audio/formats/wav
 import ./audio/formats/flac as flacfmt
 import ./audio/formats/ogg as oggfmt
+import ./audio/formats/mpa as mpafmt
 
 export errors
 export units
@@ -34,7 +36,9 @@ export pcm
 export adpcm
 export flac
 export vorbis
+export mpa
 export dsp
 export wav
 export flacfmt
 export oggfmt
+export mpafmt

@@ -331,6 +331,120 @@ proc ignoreBits*(b: var BitReader; n: int) =
   b.bytePos += b.bitPos div 8
   b.bitPos = b.bitPos mod 8
 
+type
+  VlcEntryKind* = enum
+    veJump
+    veValue
+
+  VlcEntry* = object
+    case kind*: VlcEntryKind
+    of veJump:
+      target*: int
+    of veValue:
+      value*: uint32
+      codeLen*: int
+
+  VlcTable* = object
+    table*: seq[VlcEntry]
+    maxCodeLen*: int
+    bitsPerBlock*: int
+
+# ------------------------------------------------------ LtrBitReader ---
+
+proc rtlShr(v: uint64; n: int): uint64 {.inline.} =
+  if n >= 64: 0'u64
+  else: v shr n
+
+type
+  LtrBitReader* = object
+    ## MSB-first cached bit reader (MPEG layers). Bits are kept
+    ## top-aligned in `cache`; `left` counts valid bits from the top.
+    data*: seq[uint8]
+    pos*: int
+    cache*: uint64
+    left*: int
+
+proc newLtrBitReader*(data: openArray[uint8]): LtrBitReader {.inline.} =
+  LtrBitReader(data: data.toSeq(), pos: 0, cache: 0, left: 0)
+
+proc bitsLeft*(b: LtrBitReader): int {.inline.} =
+  (b.data.len - b.pos) * 8 + b.left
+
+proc ltrShl(v: uint64; n: int): uint64 {.inline.} =
+  if n >= 64: 0'u64
+  else: v shl n
+
+proc ltrRefill(b: var LtrBitReader; maxBytes: int) =
+  ## Appends up to `maxBytes` bytes MSB-first (top-aligned), up to 64
+  ## cached bits total. Raises only if no bits are available at all.
+  let capacity = (64 - b.left) div 8
+  var want = min(maxBytes, capacity)
+  var n = 0
+  while n < want and b.pos < b.data.len:
+    b.cache = b.cache or (b.data[b.pos].uint64 shl (56 - b.left))
+    inc b.pos
+    b.left += 8
+    inc n
+  if n == 0 and b.left == 0:
+    raise newException(EndOfStream, "mpa: end of bitstream")
+
+proc readLtrBits*(b: var LtrBitReader; n: int): uint32 =
+  ## Reads `n <= 32` bits MSB-first.
+  if n == 0:
+    return 0
+  checkDecode(n > 0 and n <= 32, "bit reader width out of range")
+  var need = n
+  var res = 0'u64
+  while need > 0:
+    if b.left == 0:
+      b.ltrRefill(8)
+    let take = min(need, b.left)
+    res = (res shl take) or rtlShr(b.cache, 64 - take)
+    b.cache = ltrShl(b.cache, take)
+    b.left -= take
+    need -= take
+  cast[uint32](res)
+
+proc readLtrBool*(b: var LtrBitReader): bool {.inline.} =
+  b.readLtrBits(1) == 1
+
+proc readLtrBit*(b: var LtrBitReader): uint32 {.inline.} =
+  b.readLtrBits(1)
+
+proc readLtrSigned*(b: var LtrBitReader; n: int): int32 =
+  signExtend(b.readLtrBits(n), n)
+
+proc ignoreLtrBits*(b: var LtrBitReader; n: int) =
+  var need = n
+  while need > 0:
+    if b.left == 0:
+      b.ltrRefill(8)
+    let take = min(need, b.left)
+    b.cache = ltrShl(b.cache, take)
+    b.left -= take
+    need -= take
+
+proc readLtrVlc*(b: var LtrBitReader; t: VlcTable): tuple[value: uint32,
+    codeLen: int] =
+  ## Walks a Verbatim (MSB-first) VLC table using the top cache bits.
+  if b.left < t.maxCodeLen:
+    b.ltrRefill(8)
+  var bits = b.cache
+  let shift = 64 - t.bitsPerBlock
+  var base = 0
+  while true:
+    let e = t.table[base + cast[int](rtlShr(bits, shift))]
+    case e.kind
+    of veJump:
+      bits = ltrShl(bits, t.bitsPerBlock)
+      base = e.target
+    of veValue:
+      if e.codeLen > b.left:
+        raise newException(EndOfStream, "mpa: end of bitstream")
+      b.cache = ltrShl(b.cache, e.codeLen)
+      b.left -= e.codeLen
+      return (e.value, e.codeLen)
+
 # ------------------------------------------------------------ BitWriter ---
 
 type
@@ -382,23 +496,6 @@ proc len*(w: BitWriter): int {.inline.} =
 # ------------------------------------------------------ RtlBitReader ---
 
 type
-  VlcEntryKind* = enum
-    veJump
-    veValue
-
-  VlcEntry* = object
-    case kind*: VlcEntryKind
-    of veJump:
-      target*: int
-    of veValue:
-      value*: uint32
-      codeLen*: int
-
-  VlcTable* = object
-    table*: seq[VlcEntry]
-    maxCodeLen*: int
-    bitsPerBlock*: int
-
   RtlBitReader* = object
     ## LSB-first bit reader (Vorbis): bit 0 read first is the LSB.
     data*: seq[uint8]
@@ -411,10 +508,6 @@ proc newRtlBitReader*(data: openArray[uint8]): RtlBitReader {.inline.} =
 
 proc bitsLeft*(b: RtlBitReader): int {.inline.} =
   (b.data.len - b.pos) * 8 + b.left
-
-proc rtlShr(v: uint64; n: int): uint64 {.inline.} =
-  if n >= 64: 0'u64
-  else: v shr n
 
 proc rtlRefill(b: var RtlBitReader; maxBytes: int) =
   ## Appends bytes LSB-first, up to `maxBytes` and up to 64 cached bits

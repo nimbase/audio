@@ -55,6 +55,30 @@ proc crc16Ansi*(data: openArray[uint8]; init = 0'u16): uint16 =
 
 # Note: the little-endian twin (MP3 frame CRCs) arrives with Phase 6.
 
+var crc16LeTable: array[256, uint16]
+var crc16LeReady = false
+
+proc initCrc16Le() =
+  for i in 0 ..< 256:
+    var crc = i.uint16
+    for _ in 0 ..< 8:
+      if (crc and 1) != 0:
+        crc = (crc shr 1) xor 0xa001'u16 # Reflected 0x8005.
+      else:
+        crc = crc shr 1
+    crc16LeTable[i] = crc
+  crc16LeReady = true
+
+proc crc16AnsiLe*(data: openArray[uint8]; init = 0'u16): uint16 =
+  ## CRC-16/ANSI reflected (poly 0x8005, init 0). MP3 LAME-tag check.
+  ## Check ("BUYPASS" params): "123456789" -> 0xBB3D.
+  if not crc16LeReady:
+    initCrc16Le()
+  var state = init
+  for b in data:
+    state = (state shr 8) xor crc16LeTable[(state and 0xff'u16) xor b.uint16]
+  state
+
 var crc32Table: array[256, uint32]
 var crc32Ready = false
 

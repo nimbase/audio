@@ -24,6 +24,7 @@ const
   FormatWavPack* = FormatId(0x10a)
   FormatIsoMp4* = FormatId(0x10b)
   FormatMkv* = FormatId(0x10c)
+  FormatMp3* = FormatId(0x106)
 
 type
   SeekMode* = enum

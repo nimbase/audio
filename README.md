@@ -27,7 +27,7 @@
 - Planar `AudioBuffer[S]` for all 10 sample formats, LSB-aligned 24-bit,
   `FromSample`-style conversion, gapless `trimStart`/`trimEnd` packets
 - Decoder registry: `registerPcm()`, `registerAdpcm()`, `registerVorbis()`,
-  then `makeAudioDecoder(params)`
+  `registerMpa()`, then `makeAudioDecoder(params)`
 
 Codec support (`o` = decode, `w` = encode):
 
@@ -41,7 +41,10 @@ Codec support (`o` = decode, `w` = encode):
   with Vorbis comment metadata
 - Vorbis: o — decoder (codebooks, floor 0/1, residues, IMDCT); matches
   ffmpeg within 2 LSB on sine fixtures
-- Checksums: CRC-8/CCITT, CRC-16/ANSI, CRC-32, MD5
+- MP3: o — MPEG-1/2/2.5 Layer 1/2/3 decoder (reservoir, Huffman,
+  hybrid synthesis) + raw-stream demuxer (Xing/Info/LAME gapless,
+  VBRI, CBR estimate, seek); matches ffmpeg/mpg123 within 2 LSB
+- Checksums: CRC-8/CCITT, CRC-16/ANSI (+LE), CRC-32 (+MPEG-2), MD5
 
 ## Examples
 
@@ -108,6 +111,26 @@ while true:
   echo samples.framesOf(), " frames"
 ```
 
+### MP3 decode
+
+```nim
+import std/options
+import audio
+
+registerMpa()
+
+let bytes = readFile("fix_mp3stereo.mp3").toBytes()
+let reader = openMpa(bytes)              # probeMpa == 255
+let dec = newMpaDecoder(reader.tracks[0].codec,
+  AudioDecoderOptions(gapless: true, verify: false))
+
+while true:
+  let pkt = reader.nextPacket()
+  if pkt.isNone: break
+  let samples = dec.decodePacket(pkt.get) # sfF32 planar
+  echo samples.framesOf(), " frames"
+```
+
 ### Probe + seek
 
 ```nim
@@ -127,7 +150,7 @@ if probeWav(bytes) == 255:
 - [x] ADPCM (MS, IMA-WAV, IMA-QT) decoders + encoders
 - [x] FLAC decoder + encoder (CRC/MD5 verify)
 - [x] Ogg demuxer + Vorbis decoder
-- [ ] MP1/MP2/MP3 decoders
+- [x] MP1/MP2/MP3 decoders
 - [ ] AAC-LC decoder + ISOMP4 demuxer
 - [ ] ALAC decoder + AIFF/CAF demuxers
 - [ ] Later: WavPack, pure-Nim Opus + HE-AAC ports, MKV/WebM, streaming
