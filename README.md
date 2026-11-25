@@ -1,6 +1,6 @@
 <p align="center">
   Pure-Nim audio encoders and decoders, no C bindings.<br>
-  Decode <i>and</i> encode WAV/PCM/ADPCM today; FLAC, Vorbis, MP3, AAC, ALAC, AIFF, CAF decode.
+  Decode <i>and</i> encode WAV/PCM/ADPCM today; FLAC, Vorbis, MP3, AAC, ALAC, AIFF, CAF, MKV/WebM decode.
 </p>
 
 <p align="center">
@@ -56,6 +56,9 @@ Codec support (`o` = decode, `w` = encode):
 - CAF: o — Core Audio demuxer (desc/data/chan/pakt/kuki, fixed and
   packet-table audio, nominal channel layouts); bit-exact PCM,
   ALAC prefix-exact over valid frames
+- MKV/WebM: o — Matroska demuxer (EBML, lacing incl. EBML/Xiph, cues,
+  Vorbis/FLAC/MP3/AAC/ALAC/PCM/Opus mapping); lossless bit-exact,
+  lossy within 2 LSB at codec-delay alignment
 - Checksums: CRC-8/CCITT, CRC-16/ANSI (+LE), CRC-32 (+MPEG-2), MD5
 
 ## Examples
@@ -207,6 +210,26 @@ while true:
   echo samples.framesOf(), " frames"
 ```
 
+### MKV/WebM decode
+
+```nim
+import std/options
+import audio
+
+registerVorbis()
+
+let bytes = readFile("fix_vorbis_stereo.mka").toBytes()
+let reader = openMkv(bytes)              # probeMkv == 255
+let dec = makeAudioDecoder(reader.tracks[0].codec,
+  AudioDecoderOptions(gapless: true, verify: false))
+
+while true:
+  let pkt = reader.nextPacket()
+  if pkt.isNone: break
+  let samples = dec.decodePacket(pkt.get) # sfF32 planar
+  echo samples.framesOf(), " frames"
+```
+
 ### Probe + seek
 
 ```nim
@@ -229,7 +252,8 @@ if probeWav(bytes) == 255:
 - [x] MP1/MP2/MP3 decoders
 - [x] AAC-LC decoder + ISOMP4 demuxer
 - [x] ALAC decoder + AIFF/CAF demuxers
-- [ ] Later: WavPack, pure-Nim Opus + HE-AAC ports, MKV/WebM, streaming
+- [x] MKV/WebM demuxer (Vorbis/FLAC/MP3/AAC/ALAC/PCM decode, Opus demux-only)
+- [ ] Later: WavPack, pure-Nim Opus + HE-AAC ports, streaming
   I/O, fuzz corpus, benchmarks
 
 ### ❤ Credits

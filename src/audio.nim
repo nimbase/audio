@@ -27,6 +27,7 @@ import ./audio/formats/mpa as mpafmt
 import ./audio/formats/mp4 as mp4fmt
 import ./audio/formats/aiff as aifffmt
 import ./audio/formats/caf as caffmt
+import ./audio/formats/mkv as mkvfmt
 
 export errors
 export units
@@ -52,3 +53,4 @@ export mpafmt
 export mp4fmt
 export aifffmt
 export caffmt
+export mkvfmt
