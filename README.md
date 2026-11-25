@@ -1,6 +1,6 @@
 <p align="center">
   Pure-Nim audio encoders and decoders, no C bindings.<br>
-  Decode <i>and</i> encode WAV/PCM/ADPCM today; FLAC, Vorbis, MP3, AAC, ALAC on the way.
+  Decode <i>and</i> encode WAV/PCM/ADPCM today; FLAC, Vorbis, MP3, AAC, ALAC, AIFF, CAF decode.
 </p>
 
 <p align="center">
@@ -27,7 +27,8 @@
 - Planar `AudioBuffer[S]` for all 10 sample formats, LSB-aligned 24-bit,
   `FromSample`-style conversion, gapless `trimStart`/`trimEnd` packets
 - Decoder registry: `registerPcm()`, `registerAdpcm()`, `registerVorbis()`,
-  `registerMpa()`, `registerAac()`, then `makeAudioDecoder(params)`
+  `registerMpa()`, `registerAac()`, `registerAlac()`,
+  then `makeAudioDecoder(params)`
 
 Codec support (`o` = decode, `w` = encode):
 
@@ -47,6 +48,14 @@ Codec support (`o` = decode, `w` = encode):
 - AAC: o — AAC-LC decoder (Huffman, TNS, KBD/sine IMDCT filterbank)
   + ISOMP4 demuxer (stbl sample tables, esds ASC, seek); matches
   ffmpeg within 2 LSB past the 1024-sample priming
+- ALAC: o — Apple Lossless decoder (Rice history/zero-run, LPC with
+  adaptive coefficients, mid-side, tail bits; sfS32 planar output);
+  bit-exact on fixtures
+- AIFF: o — AIFF/AIFC demuxer (BE chunks, COMM/SSND, 80-bit rate,
+  NAME/AUTH/`(c) `/ANNO tags, 1152-frame seek); bit-exact PCM
+- CAF: o — Core Audio demuxer (desc/data/chan/pakt/kuki, fixed and
+  packet-table audio, nominal channel layouts); bit-exact PCM,
+  ALAC prefix-exact over valid frames
 - Checksums: CRC-8/CCITT, CRC-16/ANSI (+LE), CRC-32 (+MPEG-2), MD5
 
 ## Examples
@@ -157,6 +166,47 @@ Note: like Symphonia, edit lists are parsed but not applied, so the
 first 1024 decoded samples are encoder priming (dark silence to
 discard for gapless playback).
 
+### ALAC decode (MP4 or CAF)
+
+```nim
+import std/options
+import audio
+
+registerAlac()
+
+let bytes = readFile("fix_alacstereo.m4a").toBytes()
+let reader = openMp4(bytes)              # alac sample entry + cookie
+# let reader = openCaf(readFile("fix_alacstereo.caf").toBytes())
+let dec = newAlacDecoder(reader.tracks[0].codec,
+  AudioDecoderOptions(gapless: true, verify: false))
+
+while true:
+  let pkt = reader.nextPacket()
+  if pkt.isNone: break
+  let samples = dec.decodePacket(pkt.get) # sfS32 planar, left-justified
+  echo samples.framesOf(), " frames"
+```
+
+### AIFF decode
+
+```nim
+import std/options
+import audio
+
+registerPcm()
+
+let bytes = readFile("fix_aiffmono.aiff").toBytes()
+let reader = openAiff(bytes)             # probeAiff == 255
+let dec = newPcmDecoder(reader.tracks[0].codec,
+  AudioDecoderOptions(gapless: true, verify: false))
+
+while true:
+  let pkt = reader.nextPacket()
+  if pkt.isNone: break
+  let samples = dec.decodePacket(pkt.get) # sfS16 planar
+  echo samples.framesOf(), " frames"
+```
+
 ### Probe + seek
 
 ```nim
@@ -178,7 +228,7 @@ if probeWav(bytes) == 255:
 - [x] Ogg demuxer + Vorbis decoder
 - [x] MP1/MP2/MP3 decoders
 - [x] AAC-LC decoder + ISOMP4 demuxer
-- [ ] ALAC decoder + AIFF/CAF demuxers
+- [x] ALAC decoder + AIFF/CAF demuxers
 - [ ] Later: WavPack, pure-Nim Opus + HE-AAC ports, MKV/WebM, streaming
   I/O, fuzz corpus, benchmarks
 

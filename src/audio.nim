@@ -18,12 +18,15 @@ import ./audio/codecs/flac
 import ./audio/codecs/vorbis
 import ./audio/codecs/mpa
 import ./audio/codecs/aac
+import ./audio/codecs/alac
 import ./audio/dsp
 import ./audio/formats/wav
 import ./audio/formats/flac as flacfmt
 import ./audio/formats/ogg as oggfmt
 import ./audio/formats/mpa as mpafmt
 import ./audio/formats/mp4 as mp4fmt
+import ./audio/formats/aiff as aifffmt
+import ./audio/formats/caf as caffmt
 
 export errors
 export units
@@ -40,9 +43,12 @@ export flac
 export vorbis
 export mpa
 export aac
+export alac
 export dsp
 export wav
 export flacfmt
 export oggfmt
 export mpafmt
 export mp4fmt
+export aifffmt
+export caffmt

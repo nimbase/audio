@@ -19,6 +19,7 @@ import std/options
 import ./../audio
 import ./../codecs
 import ./../codecs/aac
+import ./../codecs/alac
 import ./../errors
 import ./../formats
 import ./../io
@@ -273,7 +274,7 @@ proc parseMp4aEntry(r: var Reader; stop: int): tuple[rate: uint32,
   (rate, nch, extra, oti)
 
 proc readStbl(r: var Reader; stop: int): tuple[
-    rate: uint32, nch: int, extra: seq[uint8], oti: int,
+    rate: uint32, nch: int, extra: seq[uint8], oti: int, isAlac: bool,
     stts: seq[array[2, uint64]], sttsTotal: uint64,
     stsc: seq[array[2, uint32]], stscFirst: seq[uint64],
     stszConst: int, stsz: seq[uint32],
@@ -281,6 +282,7 @@ proc readStbl(r: var Reader; stop: int): tuple[
   var rate = 0'u32
   var nch = 0
   var extra: seq[uint8] = @[]
+  var isAlac = false
   var oti = -1
   var stts: seq[array[2, uint64]] = @[]
   var sttsTotal = 0'u64
@@ -312,6 +314,37 @@ proc readStbl(r: var Reader; stop: int): tuple[
         nch = nc
         extra = ex
         oti = o
+      elif entry == "alac":
+        r.pos = entry.dataPos
+        if r.pos + 28 > entry.stop:
+          raise decodeError("mp4: truncated alac entry")
+        r.ignoreBytes(6)
+        discard r.readU16Be()
+        discard r.readU16Be() # version
+        r.ignoreBytes(6)
+        nch = r.readU16Be().int
+        discard r.readU16Be()
+        r.ignoreBytes(4)
+        let rateRaw = r.readU32Be()
+        rate = (rateRaw shr 16) + (if (rateRaw and 0xffff) >= 0x8000: 1'u32 else: 0'u32)
+        while r.pos + 8 <= entry.stop:
+          let child = r.readBoxHeader(entry.stop)
+          if child == "alac":
+            r.pos = child.dataPos
+            let (ver, flags) = r.readExtended()
+            if ver != 0:
+              raise unsupportedError("mp4: unsupported alac version")
+            if flags != 0:
+              raise decodeError("mp4: alac flags not zero")
+            let left = child.stop - r.pos
+            if left != 24 and left != 48:
+              raise decodeError("mp4: invalid alac magic cookie length")
+            extra = r.readBytes(left)
+            isAlac = true
+            r.pos = child.stop
+          else:
+            r.skipBox(child)
+        r.pos = entry.stop
       else:
         r.skipBox(entry)
       r.pos = b.stop
@@ -401,8 +434,8 @@ proc readStbl(r: var Reader; stop: int): tuple[
     raise decodeError("mp4: missing stsz atom")
   if offsets.len == 0:
     raise decodeError("mp4: missing stco or co64 atom")
-  (rate, nch, extra, oti, stts, sttsTotal, stsc, stscFirst, stszConst, stsz,
-    sampleCount, offsets)
+  (rate, nch, extra, oti, isAlac, stts, sttsTotal, stsc, stscFirst,
+    stszConst, stsz, sampleCount, offsets)
 
 proc stscEntryFor(stsc: seq[array[2, uint32]];
     first: seq[uint64]; sample: int): int =
@@ -466,7 +499,7 @@ proc buildTrackSamples(stts: seq[array[2, uint64]];
 
 proc readTrak(r: var Reader; stop: int): tuple[id: int, handler: string,
     timescale: uint32, mdhdDur: uint64, rate: uint32, nch: int,
-    extra: seq[uint8], oti: int, samples: seq[Mp4Sample],
+    extra: seq[uint8], oti: int, isAlac: bool, samples: seq[Mp4Sample],
     sttsTotal: uint64] =
   var id = 0
   var handler = ""
@@ -475,6 +508,7 @@ proc readTrak(r: var Reader; stop: int): tuple[id: int, handler: string,
   var rate = 0'u32
   var nch = 0
   var extra: seq[uint8] = @[]
+  var isAlac = false
   var oti = -1
   var samples: seq[Mp4Sample] = @[]
   var sttsTotal = 0'u64
@@ -556,6 +590,7 @@ proc readTrak(r: var Reader; stop: int): tuple[id: int, handler: string,
               rate = t.rate
               nch = t.nch
               extra = t.extra
+              isAlac = t.isAlac
               oti = t.oti
               samples = buildTrackSamples(t.stts, t.stsc, t.stscFirst,
                 t.stszConst, t.stsz, t.sampleCount, t.offsets,
@@ -579,8 +614,8 @@ proc readTrak(r: var Reader; stop: int): tuple[id: int, handler: string,
     raise decodeError("mp4: missing hdlr atom")
   if not haveStbl:
     raise decodeError("mp4: missing stbl atom")
-  (id, handler, timescale, mdhdDur, rate, nch, extra, oti, samples,
-    sttsTotal)
+  (id, handler, timescale, mdhdDur, rate, nch, extra, oti, isAlac,
+    samples, sttsTotal)
 
 proc openMp4*(data: seq[uint8]): Mp4Reader =
   if probeMp4(data) == 0:
@@ -631,14 +666,24 @@ proc openMp4*(data: seq[uint8]): Mp4Reader =
           r.pos = c.dataPos
           let t = r.readTrak(c.stop)
           r.pos = c.stop
-          if t.handler == "soun" and t.oti in [0x40, 0x66, 0x67]:
-            var params = forCodec(CodecAac)
+          if t.handler == "soun" and
+              (t.oti in [0x40, 0x66, 0x67] or t.isAlac):
+            var params =
+              if t.isAlac: forCodec(CodecAlac)
+              else: forCodec(CodecAac)
             params.sampleRate = some(t.rate)
             if t.nch == 1:
               params.channels = some(ChMono)
             elif t.nch == 2:
               params.channels = some(ChStereo)
-            if t.extra.len >= 2:
+            if t.isAlac:
+              try:
+                let ck = readAlacCookie(t.extra)
+                params.channels = some(ck.channels)
+                params.sampleRate = some(ck.sampleRate)
+              except AudioError:
+                discard
+            elif t.extra.len >= 2:
               try:
                 let asc = readAudioSpecificConfig(t.extra)
                 if asc.channels.isSome:
