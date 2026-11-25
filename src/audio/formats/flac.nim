@@ -177,7 +177,7 @@ proc calcTs(info: StreamInfo; header: FrameHeader): uint64 =
       header.sequence.frame.uint64 * header.blockSamples.uint64
 
 proc strictCheck(info: StreamInfo; header: FrameHeader;
-    lastSeq: uint64; hasLast: bool; isFixed: bool): bool =
+    lastSeq: uint64; hasLast: bool): bool =
   if header.sampleRate.isSome and header.sampleRate.get != info.sampleRate:
     return false
   if header.bitsPerSample.isSome and
@@ -185,14 +185,18 @@ proc strictCheck(info: StreamInfo; header: FrameHeader;
     return false
   if header.blockSamples > info.blockLenMax:
     return false
+  # Key monotonicity off the header's own blocking strategy (frame vs
+  # sample numbers), not the StreamInfo min/max heuristic: a
+  # variable-block stream may still declare min == max when all
+  # non-final blocks share one size.
   let mono =
     case header.sequence.kind
     of bsSample:
-      not isFixed and (header.sequence.sample > lastSeq or
-        (not hasLast and header.sequence.sample == 0))
+      header.sequence.sample > lastSeq or
+        (not hasLast and header.sequence.sample == 0)
     of bsFrame:
-      isFixed and (header.sequence.frame.uint64 > lastSeq or
-        (not hasLast and header.sequence.frame == 0))
+      header.sequence.frame.uint64 > lastSeq or
+        (not hasLast and header.sequence.frame == 0)
   if not mono:
     return false
   let nch =
@@ -209,7 +213,6 @@ proc buildIndex(data: seq[uint8]; info: StreamInfo;
   var pos = start
   var lastSeq = 0'u64
   var hasLast = false
-  let isFixed = info.blockLenMin == info.blockLenMax
   # Minimal header for the strict check (rate/bps from StreamInfo so the
   # check matches the reference, which fills them in first).
   while pos < data.len:
@@ -229,7 +232,7 @@ proc buildIndex(data: seq[uint8]; info: StreamInfo;
       continue
     var hdr = h0.get
     fillStream(hdr, info)
-    if not strictCheck(info, hdr, lastSeq, hasLast, isFixed):
+    if not strictCheck(info, hdr, lastSeq, hasLast):
       pos = syncAt + 1
       continue
     # Find the frame end: the next header that is monotonic and strict.
@@ -243,7 +246,7 @@ proc buildIndex(data: seq[uint8]; info: StreamInfo;
           var hh = h1.get
           fillStream(hh, info)
           if seqOf(hh) > seqOf(hdr) and
-              strictCheck(info, hh, seqOf(hdr), true, isFixed) and
+              strictCheck(info, hh, seqOf(hdr), true) and
               verifyFooter(data, syncAt, q):
             frameEnd = q
             break
@@ -425,8 +428,11 @@ proc toRawPlanes*(samples: AudioSamples; bps: uint32): seq[seq[int32]] =
     raise unsupportedError("flac: encoder needs s16, s24 or s32 input")
 
 proc encodeFlacStream*(samples: AudioSamples; sampleRate: uint32;
-    bitsPerSample = 0'u32): seq[uint8] =
+    bitsPerSample = 0'u32;
+    opts = defaultFlacEncoderOptions()): seq[uint8] =
   ## Muxes planar samples into a complete native FLAC stream (new work).
+  ## Full RFC 9639 headers: explicit rate/depth codings, fixed or variable
+  ## blocking, seek table, MD5, real min/max frame sizes.
   let bps =
     if bitsPerSample != 0: bitsPerSample
     else:
@@ -444,13 +450,9 @@ proc encodeFlacStream*(samples: AudioSamples; sampleRate: uint32;
   let n = samples.framesOf()
   if n == 0:
     raise unsupportedError("flac: no frames to encode")
-  const BlockSize = 4096
-  let blk = min(n, BlockSize)
-  var info = StreamInfo(blockLenMin: cast[uint16](blk),
-    blockLenMax: cast[uint16](blk), frameByteLenMin: 0,
-    frameByteLenMax: 0, sampleRate: sampleRate,
-    channels: flacChannels(nch), bitsPerSample: bps,
-    nSamples: some(n.uint64), md5: none(array[16, uint8]))
+  if n.uint64 >= 0x80000000'u64:
+    raise limitError("flac: stream exceeds 31-bit sample numbering")
+  let blk = min(n, encoderBlockSize(opts))
   # MD5 over the input (validator scheme: interleaved LE at byte width).
   var validator: FlacValidator
   validator.initValidator()
@@ -458,15 +460,87 @@ proc encodeFlacStream*(samples: AudioSamples; sampleRate: uint32;
     spec: newAudioSpec(sampleRate, flacChannels(nch)), planes: planes,
     numFrames: n, capacity: n)
   validator.updateValidator(tmp, bps)
-  info.md5 = some(validator.validatorDigest())
-  # min == max declares fixed blocking; a short tail block is legal
-  # (the strict header check only rejects blocks larger than the max).
+  let digest = validator.validatorDigest()
+  # Encode frames first (min/max sizes only known afterwards).
+  var frameBytes: seq[seq[uint8]] = @[]
+  var frameSamples: seq[int] = @[]
+  var frameFirst: seq[uint64] = @[]
+  var off = 0
+  var seqNum = 0'u64
+  var frameNum = 0'u32
+  while off < n:
+    let m = min(blk, n - off)
+    var blockPlanes = newSeq[seq[int32]](nch)
+    for p in 0 ..< nch:
+      blockPlanes[p] = planes[p].toOpenArray(off, off + m - 1).toSeq()
+    let fb = encodeFlacFrameEx(blockPlanes,
+      if opts.variableBlock: seqNum else: frameNum.uint64,
+      opts.variableBlock, bps, sampleRate, opts)
+    frameBytes.add(fb)
+    frameSamples.add(m)
+    frameFirst.add(seqNum)
+    off += m
+    seqNum += m.uint64
+    inc frameNum
+  var sizeMin = high(int)
+  var sizeMax = 0
+  for i, fb in frameBytes:
+    # Minimum excludes the last block (RFC 9639 section 8.2).
+    if i < frameBytes.len - 1:
+      sizeMin = min(sizeMin, fb.len)
+    sizeMax = max(sizeMax, fb.len)
+  if frameBytes.len == 1:
+    sizeMin = sizeMax
+  var info = StreamInfo(blockLenMin: cast[uint16](blk),
+    blockLenMax: cast[uint16](blk), frameByteLenMin: sizeMin.uint32,
+    frameByteLenMax: sizeMax.uint32, sampleRate: sampleRate,
+    channels: flacChannels(nch), bitsPerSample: bps,
+    nSamples: some(n.uint64), md5: some(digest))
+  if opts.variableBlock:
+    var lo = high(int)
+    var hi = 0
+    for i, m in frameSamples:
+      if i < frameSamples.len - 1:
+        lo = min(lo, m)
+      hi = max(hi, m)
+    if frameSamples.len == 1:
+      lo = hi
+    info.blockLenMin = cast[uint16](lo)
+    info.blockLenMax = cast[uint16](hi)
   var w = newWriter()
   w.writeBytes([0x66'u8, 0x4c, 0x61, 0x43])
   # StreamInfo (not last).
   w.writeByte(0x00)
   w.writeU24Be(34)
   w.writeBytes(writeStreamInfo(info))
+  # Seek table (not last): one point per frame start.
+  if opts.writeSeekTable:
+    w.writeByte(0x03)
+    w.writeU24Be((frameBytes.len * 18).uint32)
+    var at = 0'u64
+    for i in 0 ..< frameBytes.len:
+      var sw = newWriter()
+      let sn = frameFirst[i]
+      sw.writeByte(cast[uint8](sn shr 56))
+      sw.writeByte(cast[uint8](sn shr 48))
+      sw.writeByte(cast[uint8](sn shr 40))
+      sw.writeByte(cast[uint8](sn shr 32))
+      sw.writeByte(cast[uint8](sn shr 24))
+      sw.writeByte(cast[uint8](sn shr 16))
+      sw.writeByte(cast[uint8](sn shr 8))
+      sw.writeByte(cast[uint8](sn))
+      sw.writeByte(cast[uint8](at shr 56))
+      sw.writeByte(cast[uint8](at shr 48))
+      sw.writeByte(cast[uint8](at shr 40))
+      sw.writeByte(cast[uint8](at shr 32))
+      sw.writeByte(cast[uint8](at shr 24))
+      sw.writeByte(cast[uint8](at shr 16))
+      sw.writeByte(cast[uint8](at shr 8))
+      sw.writeByte(cast[uint8](at))
+      sw.writeByte(cast[uint8](frameSamples[i] shr 8))
+      sw.writeByte(cast[uint8](frameSamples[i]))
+      w.writeBytes(sw.toBytes())
+      at += frameBytes[i].len.uint64
   # Minimal VorbisComment (last): vendor "openAudio", no tags.
   let vendor = "openAudio"
   w.writeByte(0x80 or 4)
@@ -477,15 +551,6 @@ proc encodeFlacStream*(samples: AudioSamples; sampleRate: uint32;
   let vcBytes = vc.toBytes()
   w.writeU24Be(vcBytes.len.uint32)
   w.writeBytes(vcBytes)
-  # Frames.
-  var frameNum = 0'u32
-  var off = 0
-  while off < n:
-    let m = min(blk, n - off)
-    var blockPlanes = newSeq[seq[int32]](nch)
-    for p in 0 ..< nch:
-      blockPlanes[p] = planes[p].toOpenArray(off, off + m - 1).toSeq()
-    w.writeBytes(encodeFlacFrame(blockPlanes, frameNum, bps.int))
-    inc frameNum
-    off += m
+  for fb in frameBytes:
+    w.writeBytes(fb)
   w.toBytes()

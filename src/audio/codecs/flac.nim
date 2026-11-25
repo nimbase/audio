@@ -7,9 +7,19 @@
 ## arithmetic matches the reference release behavior bit-for-bit and
 ## never raises on hostile input.
 ##
-## The encoder is new work (subset: fixed predictors + verbatim, Rice
-## order-0 partitions, independent channels, optional wasted bits).
+## FLAC encoder (callsites use `encodeSubframeEx` through frames).
+##
+## Full RFC 9639 encoder (new work): constant / fixed 0-4 / LPC 1-32
+## (apodized autocorrelation + Levinson-Durbin, per-order precision and
+## non-negative shift search) with exact bit-cost selection, wasted
+## bits, partitioned Rice (4-bit and, at level >= 3, 5-bit Rice2) with
+## escape, mid-side / left-side / right-side decorrelation, fixed or
+## variable blocking, explicit rate/depth/blocksize header codings,
+## frame CRC-8 and footer CRC-16, seek table + MD5 finalization in the
+## muxer. `FlacEncoderOptions.level` (0-8, default 5) scales the search
+## effort; output is always lossless and deterministic.
 
+import std/math
 import std/options
 import ./../audio
 import ./../checksum
@@ -170,8 +180,10 @@ proc readFrameHeader*(r: var Reader; sync: uint16): FrameHeader =
     elif first < 0xf8: 0x07
     elif first < 0xfc: 0x03
     elif first < 0xfe: 0x01
-    elif first == 0xfe: 0x00
-    else: raise decodeError("flac: frame sequence number is not valid")
+    else:
+      # 0xFE would need a 7-byte sequence (only for >= 2^31 samples);
+      # reject instead of hanging the zero-counter below.
+      raise decodeError("flac: frame sequence number is not valid")
   if mask == 0x80'u8:
     seqNum = first.uint64
   else:
@@ -634,66 +646,7 @@ proc riceUnsigned*(v: int32): uint32 {.inline.} =
   ## Signed residual to unsigned Rice code.
   cast[uint32]((v shl 1) xor (v shr 31))
 
-proc bestRiceParam*(residuals: openArray[int32]): tuple[k: int, escape: bool,
-    width: int] =
-  ## Picks the cheapest Rice parameter (order-0 partition), or the binary
-  ## escape when raw coding wins. Returns (k, isEscape, escapeWidth).
-  var bestK = 0
-  var bestCost = high(int64)
-  let n = residuals.len
-  for k in 0 ..< 15:
-    var cost = n.int64 * (1 + k).int64
-    for r in residuals:
-      cost += (riceUnsigned(r) shr k).int64
-    if cost < bestCost:
-      bestCost = cost
-      bestK = k
-  # Escape cost: 5-bit width field + n * width.
-  var width = 0
-  for r in residuals:
-    let need =
-      if r >= 0:
-        if r == 0: 1
-        else:
-          var b = 0
-          var v = r.uint32
-          while v != 0:
-            inc b
-            v = v shr 1
-          b + 1
-      else:
-        var b = 0
-        var v = cast[uint32](not r)
-        while v != 0:
-          inc b
-          v = v shr 1
-        b + 1
-    width = max(width, need)
-  let escapeCost = 5'i64 + n.int64 * width.int64
-  # Rice header cost: 4-bit param (order-0 partition header is 4 + 4 bits,
-  # accounted by the caller); compare payload only here.
-  if escapeCost < bestCost:
-    (0, true, width)
-  else:
-    (bestK, false, 0)
 
-proc encodeRicePartition*(w: var BitWriter; residuals: openArray[int32]) =
-  ## Emits an order-0 Rice partition (method 00, partition order 0).
-  w.writeBits(0, 2) # method: Rice, 4-bit params
-  w.writeBits(0, 4) # partition order 0
-  let (k, escape, width) = bestRiceParam(residuals)
-  if escape:
-    w.writeBits(0x0f, 4)
-    w.writeBits(width.uint32, 5)
-    for r in residuals:
-      w.writeSigned(r, width)
-  else:
-    w.writeBits(k.uint32, 4)
-    for r in residuals:
-      let u = riceUnsigned(r)
-      w.writeUnary(u shr k)
-      if k > 0:
-        w.writeBits(u and ((1'u32 shl k) - 1), k)
 
 proc fixedResiduals*(order: int; samples: openArray[int32]): seq[int32] =
   ## Inverse fixed predictor: warm-up samples verbatim, rest residuals.
@@ -729,9 +682,415 @@ proc trailingZeros(v: int32): int =
     inc result
     u = u shr 1
 
-proc encodeSubframe*(w: var BitWriter; samples: openArray[int32];
-    bps: int) =
-  ## Chooses constant / fixed 0..4 / verbatim by actual bit cost.
+
+
+# ------------------------------------------------ Full encoder (RFC 9639) ---
+
+type
+  FlacEncoderOptions* = object
+    ## Compression effort knob. Higher levels spend more search time for
+    ## smaller files; output is always lossless and deterministic.
+    level*: range[0 .. 8]
+    blockSize*: int        ## 0 = level default (4096, subset-legal).
+    variableBlock*: bool  ## Variable-block-size strategy (sample numbers).
+    writeSeekTable*: bool ## Emit a seek table (default true).
+
+proc defaultFlacEncoderOptions*(): FlacEncoderOptions {.inline.} =
+  FlacEncoderOptions(level: 5, blockSize: 0, variableBlock: false,
+    writeSeekTable: true)
+
+proc maxLpcOrder*(opts: FlacEncoderOptions): int =
+  ## LPC order cap per level (subset caps at 12 for <= 48 kHz; L7/L8 are
+  ## for high rates or explicitly non-subset streams).
+  case opts.level
+  of 0, 1: 0
+  of 2: 6
+  of 3: 8
+  of 4, 5: 12
+  of 6: 16
+  of 7: 24
+  else: 32
+
+proc maxPartitionOrder*(opts: FlacEncoderOptions): int =
+  case opts.level
+  of 0, 1, 2: 0
+  of 3: 2
+  of 4: 3
+  of 5: 4
+  of 6: 6
+  else: 8
+
+proc doDecorrelate*(opts: FlacEncoderOptions): bool {.inline.} =
+  opts.level >= 1
+
+proc encoderBlockSize*(opts: FlacEncoderOptions): int =
+  if opts.blockSize != 0:
+    if opts.blockSize < 16 or opts.blockSize > 65535:
+      raise unsupportedError("flac: block size out of bounds")
+    return opts.blockSize
+  4096
+
+# ---------------------------------------------------------- LPC estimate ---
+
+proc levinsonDurbin*(r: openArray[float64];
+    order: int): tuple[coeffs: seq[float64], err: float64] =
+  ## Solves the Yule-Walker equations up to `order`, returning the
+  ## order-`order` coefficients and the prediction error energy.
+  result.coeffs = newSeq[float64](order)
+  result.err = 0.0
+  if order == 0 or r[0] <= 0.0:
+    return
+  var a = newSeq[float64](order)
+  var e = r[0]
+  for i in 1 .. order:
+    var acc = r[i]
+    for j in 0 ..< i - 1:
+      acc -= a[j] * r[i - 1 - j]
+    let k = acc / e
+    if k != k or k <= -1.0 or k >= 1.0:
+      # Unstable reflection: truncate here (fewer, stable orders win).
+      for j in 0 ..< i - 1:
+        result.coeffs[j] = a[j]
+      result.err = e
+      return
+    for j in 0 ..< i - 1:
+      a[j] = a[j] - k * a[i - 2 - j]
+    a[i - 1] = k
+    e *= 1.0 - k * k
+    if e <= 0.0 or e != e:
+      for j in 0 .. i - 1:
+        result.coeffs[j] = a[j]
+      result.err = e
+      return
+  result.coeffs = a
+  result.err = e
+
+proc quantizeLpc*(a: openArray[float64];
+    precision: int): tuple[ok: bool, shift: int, coeffs: seq[int32]] =
+  ## Quantizes float coefficients to `precision`-bit integers with a
+  ## non-negative shift (RFC B.4 forbids negative shifts). `precision` is
+  ## the stored width (1..15; 16+ is the 0b1111 forbidden pattern).
+  result.ok = false
+  result.coeffs = @[]
+  if precision < 1 or precision > 15:
+    return
+  var maxA = 0.0
+  for v in a:
+    let m = abs(v)
+    if m > maxA:
+      maxA = m
+  if maxA == 0.0:
+    result = (true, 0, newSeq[int32](a.len))
+    return
+  let limit = (1 shl (precision - 1)).float64 - 1.0
+  if maxA >= (1 shl (precision - 1)).float64:
+    return # Does not fit even at shift 0.
+  var shift = 0
+  if maxA > 0.0:
+    shift = floor(log2(limit / maxA)).int
+  if shift > 31:
+    shift = 31
+  if shift < 0:
+    return
+  result.shift = shift
+  result.coeffs = newSeq[int32](a.len)
+  let gain = pow(2.0, shift.float64)
+  for i, v in a:
+    let q = round(v * gain)
+    if abs(q) >= (1 shl (precision - 1)).float64:
+      return # Rounding overflow: reject this precision.
+    result.coeffs[i] = q.int32
+  result.ok = true
+
+proc lpcResiduals*(order: int; coeffs: openArray[int32]; shift: int;
+    samples: openArray[int32]): seq[int32] =
+  ## Exact integer residuals (wrapping), mirroring `lpcPredict` bit-for-bit.
+  result = newSeq[int32](samples.len)
+  for i in 0 ..< min(order, samples.len):
+    result[i] = samples[i]
+  for i in order ..< samples.len:
+    var predicted = 0'i64
+    for j in 0 ..< order:
+      # qc[j] taps x[i-1-j] (newest-first), matching the bitstream order
+      # the decoder applies (first transmitted coefficient hits x[i-1]).
+      predicted = predicted +% coeffs[j].int64 *%
+        samples[i - 1 - j].int64
+    let p = cast[int32](predicted shr shift)
+    result[i] = samples[i] -% p
+
+# ------------------------------------------------- Partitioned residual ---
+
+type
+  RiceChoice* = object
+    escape*: bool
+    k*: int    ## Rice parameter (valid unless `escape`).
+    width*: int ## Escape width (valid if `escape`).
+    bits*: int ## Total bits for this partition, incl. parameter field.
+
+proc escapeWidth*(res: openArray[int32]): int =
+  ## Minimum raw width holding every residual (decoder `signExtend` rule).
+  for r in res:
+    let need =
+      if r >= 0:
+        if r == 0: 1
+        else:
+          var b = 0
+          var v = r.uint32
+          while v != 0:
+            inc b
+            v = v shr 1
+          b + 1
+      else:
+        var b = 0
+        var v = cast[uint32](not r)
+        while v != 0:
+          inc b
+          v = v shr 1
+        b + 1
+    result = max(result, need)
+
+proc chooseRice*(res: openArray[int32];
+    allowRice2: bool): RiceChoice =
+  ## Exact cheapest coding of one partition (4-bit params, optional 5-bit
+  ## Rice2, 4-bit escape). Payload cost of parameter `k` is
+  ## `sum((folded shr k) + 1 + k)`.
+  var maxU = 0'u32
+  for r in res:
+    let u = riceUnsigned(r)
+    if u > maxU:
+      maxU = u
+  var bitLen = 0
+  var t = maxU
+  while t != 0:
+    inc bitLen
+    t = t shr 1
+  var maxK = bitLen # Larger k only grows `n * (1 + k)` once q is all 0.
+  if not allowRice2:
+    maxK = min(maxK, 14)
+  else:
+    maxK = min(maxK, 30)
+  var bestK = 0
+  var bestPayload = high(int64)
+  for k in 0 .. maxK:
+    var c = res.len.int64 * (1 + k).int64
+    for r in res:
+      c += (riceUnsigned(r) shr k).int64
+    if c < bestPayload:
+      bestPayload = c
+      bestK = k
+  let useRice2 = bestK > 14
+  let riceBits = (if useRice2: 5 else: 4) + bestPayload.int
+  let escW = escapeWidth(res)
+  # Widths above 31 are not representable in the 5-bit escape field;
+  # Rice (k <= 30) always wins those comparisons anyway.
+  let escBits = 4 + 5 + res.len * escW
+  if escW <= 31 and escBits < riceBits:
+    RiceChoice(escape: true, k: 0, width: escW, bits: escBits)
+  else:
+    RiceChoice(escape: false, k: bestK, width: 0, bits: riceBits)
+
+proc choosePartitions*(residuals: openArray[int32]; nPrelude, maxPO: int;
+    allowRice2: bool): tuple[po: int, method5: bool,
+    choices: seq[RiceChoice], bits: int] =
+  ## Exact cheapest partition order (method + order header included).
+  ## Skips orders where the block is not divisible or the first partition
+  ## cannot hold the warm-up samples (decoder hard errors on both).
+  let n = residuals.len
+  result = (0, false, @[], high(int))
+  var po = 0
+  while po <= maxPO:
+    let nPart = 1 shl po
+    if nPart > n or n mod nPart != 0:
+      break # Larger orders only get worse here.
+    let partLen = n div nPart
+    if partLen < max(nPrelude, 1):
+      inc po
+      continue
+    var choices = newSeq[RiceChoice](nPart)
+    var total = 2 + 4
+    var need5 = false
+    for i in 0 ..< nPart:
+      let lo = if i == 0: nPrelude else: i * partLen
+      let hi = (i + 1) * partLen
+      let ch = chooseRice(residuals.toOpenArray(lo, hi - 1), allowRice2)
+      if ch.k > 14:
+        need5 = true
+      total += ch.bits
+      choices[i] = ch
+    if total < result.bits:
+      result = (po, need5, choices, total)
+    inc po
+
+proc emitRiceChoice(w: var BitWriter; res: openArray[int32];
+    ch: RiceChoice; method5: bool) =
+  if ch.escape:
+    w.writeBits(if method5: 0x1f'u32 else: 0x0f'u32,
+      if method5: 5 else: 4)
+    w.writeBits(ch.width.uint32, 5)
+    for r in res:
+      w.writeSigned(r, ch.width)
+  else:
+    w.writeBits(ch.k.uint32, if method5: 5 else: 4)
+    for r in res:
+      let u = riceUnsigned(r)
+      w.writeUnary(u shr ch.k)
+      if ch.k > 0:
+        w.writeBits(u and ((1'u32 shl ch.k) - 1), ch.k)
+
+proc encodeRicePartitions*(w: var BitWriter; residuals: openArray[int32];
+    nPrelude, maxPO: int; allowRice2 = true) =
+  ## Emits method + order + per-partition Rice codes (new work).
+  let (po, method5, choices, _) = choosePartitions(residuals, nPrelude,
+    maxPO, allowRice2)
+  let n = residuals.len
+  let partLen = n div (1 shl po)
+  w.writeBits(if method5: 1'u32 else: 0'u32, 2)
+  w.writeBits(po.uint32, 4)
+  for i, ch in choices:
+    let lo = if i == 0: nPrelude else: i * partLen
+    emitRiceChoice(w, residuals.toOpenArray(lo, (i + 1) * partLen - 1), ch,
+      method5)
+
+# --------------------------------------- Apodization (windowing) ---
+
+type
+  ApodizationKind* = enum
+    akRectangular
+    akTukey
+    akWelch
+
+proc apodize*(x: openArray[int32]; kind: ApodizationKind;
+    buf: var seq[float64]) =
+  ## Applies a window for autocorrelation (estimation only; exact
+  ## residuals are always computed on the unwindowed signal, so this
+  ## cannot affect losslessness). Tukey uses p = 0.5 like libFLAC.
+  let n = x.len
+  if buf.len != n:
+    buf.setLen(n)
+  case kind
+  of akRectangular:
+    for i in 0 ..< n:
+      buf[i] = x[i].float64
+  of akTukey:
+    const p = 0.5
+    for i in 0 ..< n:
+      let t = i.float64 / n.float64
+      var w: float64
+      if t < p / 2.0:
+        w = 0.5 * (1.0 + cos(PI * (2.0 * t / p - 1.0)))
+      elif t <= 1.0 - p / 2.0:
+        w = 1.0
+      else:
+        w = 0.5 * (1.0 + cos(PI * (2.0 * t / p - 2.0 / p + 1.0)))
+      buf[i] = x[i].float64 * w
+  of akWelch:
+    for i in 0 ..< n:
+      let t = (2.0 * i.float64 / n.float64) - 1.0
+      buf[i] = x[i].float64 * (1.0 - t * t)
+
+proc autocorrelateF*(x: openArray[float64]; maxLag: int): seq[float64] =
+  result = newSeq[float64](maxLag + 1)
+  for lag in 0 .. maxLag:
+    var s = 0.0
+    for i in 0 ..< x.len - lag:
+      s += x[i] * x[i + lag]
+    result[lag] = s
+
+proc lpcWindows*(level: int): seq[ApodizationKind] =
+  case level
+  of 5, 6: @[akRectangular, akTukey]
+  of 7 .. 8: @[akRectangular, akTukey, akWelch]
+  else: @[akRectangular]
+
+# ------------------------------------------------------------ LPC encode ---
+
+proc emitWastedFlag(w: var BitWriter; dropped: int) =
+  w.writeBit(dropped > 0)
+  if dropped > 0:
+    # Unary-coded (dropped - 1): zeros then a one.
+    for _ in 1 ..< dropped:
+      w.writeBit(false)
+    w.writeBit(true)
+
+const LpcPrecisions = [6, 9, 12, 15]
+
+proc encodeLpcCandidate(w: var BitWriter; samples: openArray[int32];
+    sbps, order, precision, shift, dropped: int; coeffs: openArray[int32];
+    maxPO: int; allowRice2: bool) =
+  w.writeBits((0x20 or (order - 1)).uint32, 6)
+  w.emitWastedFlag(dropped)
+  for i in 0 ..< order:
+    w.writeSigned(samples[i], sbps)
+  w.writeBits((precision - 1).uint32, 4)
+  w.writeSigned(shift.int32, 5)
+  for c in coeffs:
+    w.writeSigned(c, precision)
+  let full = lpcResiduals(order, coeffs, shift, samples)
+  encodeRicePartitions(w, full.toOpenArray(0, samples.len - 1), order,
+    maxPO, allowRice2)
+
+proc tryLpcSubframe*(samples: openArray[int32]; sbps, maxOrder: int;
+    allowRice2: bool;
+    windows: openArray[ApodizationKind]): tuple[ok: bool, order, precision,
+    shift: int, coeffs, res: seq[int32], rankBits: int] =
+  ## Searches windows x LPC orders x precisions by cheap rank-0 Rice. The
+  ## caller upgrades the winner to full partitioned Rice for the final
+  ## decision. Returns the winner with exact residuals (always computed
+  ## on the unwindowed signal, so windowing cannot break losslessness,
+  ## it only improves the estimate).
+  result.ok = false
+  result.rankBits = high(int)
+  result.res = @[]
+  let n = samples.len
+  let maxO = min(maxOrder, n - 1)
+  if maxO < 1:
+    return
+  var win = newSeq[float64](n)
+  for wk in windows:
+    apodize(samples, wk, win)
+    let r = autocorrelateF(win, maxO)
+    for order in 1 .. maxO:
+      let (a, _) = levinsonDurbin(r.toOpenArray(0, order), order)
+      for precision in LpcPrecisions:
+        let (ok, shift, qc) = quantizeLpc(a, precision)
+        if not ok:
+          continue
+        let res = lpcResiduals(order, qc, shift, samples)
+        let (_, _, _, rbits) = choosePartitions(res.toOpenArray(0, n - 1),
+          order, 0, allowRice2)
+        let bits = 6 + order * sbps + 4 + 5 + order * precision + rbits
+        if bits < result.rankBits:
+          result = (true, order, precision, shift, qc, res, bits)
+
+# ------------------------------------------------- Subframe selection ---
+
+proc emitFixedBody(w: var BitWriter; src: openArray[int32]; sbps, order,
+    dropped, maxPO: int; allowRice2: bool) =
+  w.writeBits((0x08 or order).uint32, 6)
+  w.emitWastedFlag(dropped)
+  for i in 0 ..< order:
+    w.writeSigned(src[i], sbps)
+  let full = fixedResiduals(order, src)
+  encodeRicePartitions(w, full.toOpenArray(0, src.len - 1), order, maxPO,
+    allowRice2)
+
+proc fixedBodyBits(src: openArray[int32]; sbps, order, maxPO: int;
+    allowRice2: bool): int =
+  let full = fixedResiduals(order, src)
+  let (_, _, _, rbits) = choosePartitions(full, order, maxPO, allowRice2)
+  6 + order * sbps + rbits
+
+proc emitVerbatimBody(w: var BitWriter; src: openArray[int32];
+    sbps, dropped: int) =
+  w.writeBits(0x01, 6)
+  w.emitWastedFlag(dropped)
+  for s in src:
+    w.writeSigned(s, sbps)
+
+proc encodeSubframeEx*(w: var BitWriter; samples: openArray[int32];
+    bps: int; opts: FlacEncoderOptions) =
+  ## Chooses constant / fixed 0..4 / LPC / verbatim by exact bit cost,
+  ## with partitioned Rice (4-bit and, at level >= 3, 5-bit Rice2).
   let n = samples.len
   var allEqual = true
   for i in 1 ..< n:
@@ -756,94 +1115,272 @@ proc encodeSubframe*(w: var BitWriter; samples: openArray[int32];
       if dropped > 0: samples[i] shr dropped
       else: samples[i]
   let sbps = bps - dropped
-  # Verbatim cost baseline.
-  var bestCost = 8 + n * sbps
-  var bestOrder = -2 # -2 = verbatim, -1 = unused, 0..4 fixed
+  let maxPO = maxPartitionOrder(opts)
+  let allowRice2 = opts.level >= 3
+  # Stage 1: rank predictors with cheap order-0 Rice. Verbatim stores raw
+  # samples (no residual coding); fixed/LPC get a final exact upgrade.
+  let verbBody = 6 + n * sbps
+  var bestFixedOrder = -1
+  var bestFixedRank = high(int)
   for order in 0 .. 4:
     if order >= n:
       break
-    let res = fixedResiduals(order, src)
-    # Residual payload cost with optimal Rice.
-    let (k, escape, width) = bestRiceParam(res.toOpenArray(order, n - 1))
-    var cost = 8 + order * sbps + 2 + 4 + 4
-    if escape:
-      cost += 5 + (n - order) * width
-    else:
-      cost += (n - order) * (1 + k)
-      for i in order ..< n:
-        cost += (riceUnsigned(res[i]) shr k).int
-    if cost < bestCost:
-      bestCost = cost
-      bestOrder = order
+    let body = fixedBodyBits(src.toOpenArray(0, n - 1), sbps, order, 0,
+      allowRice2)
+    if body < bestFixedRank:
+      bestFixedRank = body
+      bestFixedOrder = order
+  var bestLpc = (false, 0, 0, 0, newSeq[int32](), newSeq[int32](), 0)
+  let maxO = maxLpcOrder(opts)
+  if maxO > 0:
+    let (ok, order, precision, shift, coeffs, res, _) = tryLpcSubframe(
+      src.toOpenArray(0, n - 1), sbps, maxO, allowRice2,
+      lpcWindows(opts.level))
+    if ok:
+      bestLpc = (true, order, precision, shift, coeffs, res, 0)
+  # Stage 2: exact partitioned-Rice totals for the finalists.
+  var bestKind = 0 # 0 verbatim, 1 fixed, 2 lpc.
+  var bestBody = verbBody
+  if bestFixedOrder >= 0:
+    let full = fixedResiduals(bestFixedOrder, src)
+    let (_, _, _, rbits) = choosePartitions(full.toOpenArray(0, n - 1),
+      bestFixedOrder, maxPO, allowRice2)
+    let body = 6 + bestFixedOrder * sbps + rbits
+    if body < bestBody:
+      bestBody = body
+      bestKind = 1
+  if bestLpc[0]:
+    let (_, _, _, rbits) = choosePartitions(
+      bestLpc[5].toOpenArray(0, n - 1), bestLpc[1], maxPO, allowRice2)
+    let body = 6 + bestLpc[1] * sbps + 4 + 5 + bestLpc[1] *
+      bestLpc[2] + rbits
+    if body < bestBody:
+      bestBody = body
+      bestKind = 2
   w.writeBit(false)
-  if bestOrder == -2:
-    w.writeBits(0x01, 6)
-    w.writeBit(dropped > 0)
-    if dropped > 0:
-      # Unary-coded (dropped - 1): zeros then a one.
-      for _ in 1 ..< dropped:
-        w.writeBit(false)
-      w.writeBit(true)
-    for s in src:
-      w.writeSigned(s, sbps)
+  case bestKind
+  of 1:
+    emitFixedBody(w, src.toOpenArray(0, n - 1), sbps, bestFixedOrder,
+      dropped, maxPO, allowRice2)
+  of 2:
+    encodeLpcCandidate(w, src.toOpenArray(0, n - 1), sbps, bestLpc[1],
+      bestLpc[2], bestLpc[3], dropped, bestLpc[4], maxPO, allowRice2)
   else:
-    w.writeBits((0x08 or bestOrder).uint32, 6)
-    w.writeBit(dropped > 0)
-    if dropped > 0:
-      for _ in 1 ..< dropped:
-        w.writeBit(false)
-      w.writeBit(true)
-    let res = fixedResiduals(bestOrder, src)
-    for i in 0 ..< bestOrder:
-      w.writeSigned(src[i], sbps)
-    var tail = newSeq[int32](n - bestOrder)
-    for i in 0 ..< tail.len:
-      tail[i] = res[bestOrder + i]
-    w.encodeRicePartition(tail)
+    emitVerbatimBody(w, src.toOpenArray(0, n - 1), sbps, dropped)
 
-proc encodeFlacFrame*(planes: openArray[seq[int32]]; frameNum: uint32;
-    bps: int): seq[uint8] =
-  ## Encodes one independent-channels frame (new work).
+# -------------------------------------------------- Stereo + framing ---
+
+proc stereoPairBits(left, right: openArray[int32]; bps: int;
+    opts: FlacEncoderOptions; kind: int): int =
+  ## Exact bit cost of one stereo candidate (0 independent, 1 left-side,
+  ## 2 right-side, 3 mid-side).
+  let n = left.len
+  var tw = newBitWriter()
+  case kind
+  of 0:
+    tw.encodeSubframeEx(left.toOpenArray(0, n - 1), bps, opts)
+    tw.encodeSubframeEx(right.toOpenArray(0, n - 1), bps, opts)
+  of 1:
+    var side = newSeq[int32](n)
+    for i in 0 ..< n:
+      side[i] = left[i] -% right[i]
+    tw.encodeSubframeEx(left.toOpenArray(0, n - 1), bps, opts)
+    tw.encodeSubframeEx(side.toOpenArray(0, n - 1), bps + 1, opts)
+  of 2:
+    var side = newSeq[int32](n)
+    for i in 0 ..< n:
+      side[i] = left[i] -% right[i]
+    tw.encodeSubframeEx(side.toOpenArray(0, n - 1), bps + 1, opts)
+    tw.encodeSubframeEx(right.toOpenArray(0, n - 1), bps, opts)
+  else:
+    var side = newSeq[int32](n)
+    var mid = newSeq[int32](n)
+    for i in 0 ..< n:
+      side[i] = left[i] -% right[i]
+      mid[i] = (left[i] +% right[i]) shr 1
+    tw.encodeSubframeEx(mid.toOpenArray(0, n - 1), bps, opts)
+    tw.encodeSubframeEx(side.toOpenArray(0, n - 1), bps + 1, opts)
+  tw.buf.len * 8 + tw.nbits
+
+proc decideStereoAssignment*(left, right: openArray[int32]; bps: int;
+    opts: FlacEncoderOptions): uint32 =
+  ## Returns the winning header channel bits (1/8/9/10). Candidates are
+  ## quick-ranked with level-0 cost, then the winner and independent get
+  ## a full search (relative comparison only needs the top two).
+  const encs = [1'u32, 8'u32, 9'u32, 10'u32]
+  const quickOpts = FlacEncoderOptions(level: 0, blockSize: 0,
+    variableBlock: false, writeSeekTable: true)
+  var quick = [high(int), high(int), high(int), high(int)]
+  for k in 0 .. 3:
+    quick[k] = stereoPairBits(left, right, bps, quickOpts, k)
+  var first = 0
+  for k in 1 .. 3:
+    if quick[k] < quick[first]:
+      first = k
+  var best = first
+  var bestBits = stereoPairBits(left, right, bps, opts, first)
+  if first != 0:
+    let indepBits = stereoPairBits(left, right, bps, opts, 0)
+    if indepBits < bestBits:
+      bestBits = indepBits
+      best = 0
+  encs[best]
+
+proc emitStereoPair*(bw: var BitWriter; left, right: openArray[int32];
+    bps: int; opts: FlacEncoderOptions; chanEnc: uint32) =
+  let n = left.len
+  case chanEnc
+  of 8:
+    var side = newSeq[int32](n)
+    for i in 0 ..< n:
+      side[i] = left[i] -% right[i]
+    bw.encodeSubframeEx(left.toOpenArray(0, n - 1), bps, opts)
+    bw.encodeSubframeEx(side.toOpenArray(0, n - 1), bps + 1, opts)
+  of 9:
+    var side = newSeq[int32](n)
+    for i in 0 ..< n:
+      side[i] = left[i] -% right[i]
+    bw.encodeSubframeEx(side.toOpenArray(0, n - 1), bps + 1, opts)
+    bw.encodeSubframeEx(right.toOpenArray(0, n - 1), bps, opts)
+  of 10:
+    var side = newSeq[int32](n)
+    var mid = newSeq[int32](n)
+    for i in 0 ..< n:
+      side[i] = left[i] -% right[i]
+      mid[i] = (left[i] +% right[i]) shr 1
+    bw.encodeSubframeEx(mid.toOpenArray(0, n - 1), bps, opts)
+    bw.encodeSubframeEx(side.toOpenArray(0, n - 1), bps + 1, opts)
+  else:
+    bw.encodeSubframeEx(left.toOpenArray(0, n - 1), bps, opts)
+    bw.encodeSubframeEx(right.toOpenArray(0, n - 1), bps, opts)
+
+proc blockSizeCoding(n: int): tuple[enc: int, extra: seq[uint8]] =
+  ## Shortest legal block-size coding (table first, uncommon fallback).
+  if n == 192:
+    return (1, @[])
+  for k in 0 .. 4:
+    if n == 576 * (1 shl k):
+      return (2 + k, @[])
+  for k in 0 .. 7:
+    if n == 256 * (1 shl k):
+      return (8 + k, @[])
+  if n >= 16 and n <= 256:
+    return (6, @[cast[uint8](n - 1)])
+  if n > 256 and n <= 65535:
+    return (7, @[cast[uint8]((n - 1) shr 8), cast[uint8](n - 1)])
+  raise unsupportedError("flac: block size out of bounds")
+
+proc rateCoding(rate: uint32): tuple[enc: int, extra: seq[uint8]] =
+  ## Shortest legal sample-rate coding (table first, uncommon fallback,
+  ## streaminfo reference last). Covers 1..655350 Hz.
+  const table = [(88_200'u32, 1), (176_400'u32, 2), (192_000'u32, 3),
+    (8_000'u32, 4), (16_000'u32, 5), (22_050'u32, 6), (24_000'u32, 7),
+    (32_000'u32, 8), (44_100'u32, 9), (48_000'u32, 10), (96_000'u32, 11)]
+  for (r, e) in table:
+    if rate == r:
+      return (e, @[])
+  if rate mod 1000 == 0 and rate div 1000 <= 255 and rate div 1000 >= 1:
+    return (12, @[cast[uint8](rate div 1000)])
+  if rate >= 1 and rate <= 65535:
+    return (13, @[cast[uint8](rate shr 8), cast[uint8](rate)])
+  if rate mod 10 == 0 and rate div 10 <= 65535:
+    return (14, @[cast[uint8]((rate div 10) shr 8),
+      cast[uint8](rate div 10)])
+  (0, @[])
+
+proc bpsCoding(bps: uint32): int =
+  case bps
+  of 8: 1
+  of 12: 2
+  of 16: 4
+  of 20: 5
+  of 24: 6
+  of 32: 7
+  else: 0 # Refer to StreamInfo (only legal fallback for odd widths).
+
+proc writeUtf8Num(w: var Writer; v: uint64) =
+  ## UTF-8 coded number (frame or sample number, at most 31 bits: longer
+  ## values need the 7-byte form, which this package's decoder rejects to
+  ## avoid an ambiguous tail; streams that long are rejected at the muxer).
+  if v < 0x80:
+    w.writeByte(cast[uint8](v))
+  elif v < 0x800:
+    w.writeByte(cast[uint8](0xc0 or (v shr 6)))
+    w.writeByte(cast[uint8](0x80 or (v and 0x3f)))
+  elif v < 0x10000:
+    w.writeByte(cast[uint8](0xe0 or (v shr 12)))
+    w.writeByte(cast[uint8](0x80 or ((v shr 6) and 0x3f)))
+    w.writeByte(cast[uint8](0x80 or (v and 0x3f)))
+  elif v < 0x200000:
+    w.writeByte(cast[uint8](0xf0 or (v shr 18)))
+    w.writeByte(cast[uint8](0x80 or ((v shr 12) and 0x3f)))
+    w.writeByte(cast[uint8](0x80 or ((v shr 6) and 0x3f)))
+    w.writeByte(cast[uint8](0x80 or (v and 0x3f)))
+  elif v < 0x4000000:
+    w.writeByte(cast[uint8](0xf8 or (v shr 24)))
+    w.writeByte(cast[uint8](0x80 or ((v shr 18) and 0x3f)))
+    w.writeByte(cast[uint8](0x80 or ((v shr 12) and 0x3f)))
+    w.writeByte(cast[uint8](0x80 or ((v shr 6) and 0x3f)))
+    w.writeByte(cast[uint8](0x80 or (v and 0x3f)))
+  elif v < 0x80000000'u64:
+    w.writeByte(cast[uint8](0xfc or (v shr 30)))
+    w.writeByte(cast[uint8](0x80 or ((v shr 24) and 0x3f)))
+    w.writeByte(cast[uint8](0x80 or ((v shr 18) and 0x3f)))
+    w.writeByte(cast[uint8](0x80 or ((v shr 12) and 0x3f)))
+    w.writeByte(cast[uint8](0x80 or ((v shr 6) and 0x3f)))
+    w.writeByte(cast[uint8](0x80 or (v and 0x3f)))
+  else:
+    raise limitError("flac: sequence number exceeds 31 bits")
+
+proc encodeFlacFrameEx*(planes: openArray[seq[int32]]; seqNum: uint64;
+    variable: bool; bps, sampleRate: uint32;
+    opts: FlacEncoderOptions): seq[uint8] =
+  ## Encodes one frame (fixed or variable blocking strategy) with full
+  ## header codings and channel decorrelation (new work).
   let nch = planes.len
   let n = planes[0].len
-  # Byte-oriented header first (sync + desc + frame number + blocksize).
+  if n < 1 or n > 65535:
+    raise unsupportedError("flac: block size out of bounds")
+  if seqNum >= 0x80000000'u64:
+    raise limitError("flac: sequence number exceeds 31 bits")
+  if nch < 1 or nch > 8:
+    raise unsupportedError("flac: channel count out of bounds")
+  let (bsEnc, bsExtra) = blockSizeCoding(n)
+  let (rateEnc, rateExtra) = rateCoding(sampleRate)
+  let bpsEnc = bpsCoding(bps)
+  var chanEnc: uint32
+  # The side channel needs one extra bit, which is unrepresentable at
+  # 32-bit depth (subframe widths cap at 32): 32-bit stereo is always
+  # independent, matching the reference encoder.
+  let canDecor = nch == 2 and doDecorrelate(opts) and bps < 32
+  if canDecor:
+    chanEnc = decideStereoAssignment(planes[0].toOpenArray(0, n - 1),
+      planes[1].toOpenArray(0, n - 1), bps.int, opts)
+  else:
+    chanEnc = (nch - 1).uint32
   var w = newWriter()
-  w.writeU16Be(0xfff8'u16) # Sync word, fixed blocking strategy.
-  let blockEnc =
-    if n <= 255: 6
-    else: 7
-  let desc = (blockEnc.uint16 shl 12) or
-    ((nch - 1).uint16 shl 4) # rate 0, bps 0, reserved 0
+  w.writeU16Be(0xfff8'u16 or (if variable: 1'u16 else: 0'u16))
+  let desc = (bsEnc.uint16 shl 12) or (rateEnc.uint16 shl 8) or
+    (chanEnc.uint16 shl 4) or (bpsEnc.uint16 shl 1)
   w.writeU16Be(desc)
-  if frameNum < 0x80:
-    w.writeByte(cast[uint8](frameNum))
-  elif frameNum < 0x800:
-    w.writeByte(cast[uint8](0xc0 or (frameNum shr 6)))
-    w.writeByte(cast[uint8](0x80 or (frameNum and 0x3f)))
-  elif frameNum < 0x10000:
-    w.writeByte(cast[uint8](0xe0 or (frameNum shr 12)))
-    w.writeByte(cast[uint8](0x80 or ((frameNum shr 6) and 0x3f)))
-    w.writeByte(cast[uint8](0x80 or (frameNum and 0x3f)))
-  else:
-    w.writeByte(cast[uint8](0xf0 or (frameNum shr 18)))
-    w.writeByte(cast[uint8](0x80 or ((frameNum shr 12) and 0x3f)))
-    w.writeByte(cast[uint8](0x80 or ((frameNum shr 6) and 0x3f)))
-    w.writeByte(cast[uint8](0x80 or (frameNum and 0x3f)))
-  if blockEnc == 6:
-    w.writeByte(cast[uint8](n - 1))
-  else:
-    w.writeU16Be(cast[uint16](n - 1))
-  var hdrBytes = w.toBytes()
-  let crc = crc8(hdrBytes)
-  w.writeByte(crc)
+  w.writeUtf8Num(seqNum)
+  w.writeBytes(bsExtra)
+  w.writeBytes(rateExtra)
+  let hdrBytes = w.toBytes()
+  w.writeByte(crc8(hdrBytes))
   # Subframes are bit-packed from the byte-aligned header end.
   var bw = newBitWriter()
   bw.buf = w.toBytes()
-  for p in 0 ..< nch:
-    bw.encodeSubframe(planes[p].toOpenArray(0, n - 1), bps)
+  if canDecor and chanEnc >= 8:
+    emitStereoPair(bw, planes[0].toOpenArray(0, n - 1),
+      planes[1].toOpenArray(0, n - 1), bps.int, opts, chanEnc)
+  else:
+    for p in 0 ..< nch:
+      bw.encodeSubframeEx(planes[p].toOpenArray(0, n - 1), bps.int, opts)
   bw.flush()
   let frame = bw.toBytes()
   var fw = newWriter()
   fw.writeBytes(frame)
   fw.writeU16Be(crc16Ansi(frame))
   fw.toBytes()
+

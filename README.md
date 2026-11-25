@@ -36,8 +36,9 @@ Codec support (`o` = decode, `w` = encode):
 - WAV: o+w — RIFF parser (plain + EXTENSIBLE, fact, LIST/INFO, seek) and writer
 - ADPCM: o+w — MS, IMA-WAV, IMA-QT; encoders search all candidates per
   nibble (MS also tries all 7 predictors per block)
-- FLAC: o+w — subset encoder (fixed predictors + verbatim, order-0 Rice,
-  independent channels); MD5 stream verification
+- FLAC: o+w — full RFC 9639 encoder (constant/fixed/LPC-32 with
+  apodized Levinson-Durbin, mid-side/left-side/right-side, partitioned
+  Rice + Rice2, variable blocks, seek table); MD5 stream verification
 - Ogg: o — OggS demuxer (MPEG-2 CRC, packet assembly, granule seek)
   with Vorbis comment metadata
 - Vorbis: o — decoder (codebooks, floor 0/1, residues, IMDCT); matches

@@ -139,6 +139,12 @@ suite "streaminfo":
     except AudioError:
       check true
 
+proc readFileBytes(path: string): seq[uint8] =
+  let raw = readFile(path)
+  result = newSeq[uint8](raw.len)
+  for i, c in raw:
+    result[i] = cast[uint8](c)
+
 # ---------------------------------------------------------------- helpers ---
 
 proc streamInfoBytes(rate: uint32; ch: Channels; bps: uint32;
@@ -462,3 +468,541 @@ suite "flac container":
       check false
     except AudioError as e:
       check e.kind == ekUnsupported
+
+# ------------------------------------------------- helpers (phase 10) ---
+
+proc chirpS16(n: int; rate = 44_100; amp = 12_000.0): AudioSamples =
+  let spec = newAudioSpec(rate.uint32, ChMono)
+  result = newAudioSamples(sfS16, spec, n)
+  result.s16.renderWith(n, i):
+    let t = i.float64 / rate.float64
+    let f = 100.0 + 4900.0 * i.float64 / n.float64
+    let ph = 2 * PI * (100.0 * t + 4900.0 * t * t / (2.0 * n.float64 /
+      rate.float64))
+    result.s16.planes[0][i] = (amp * sin(ph)).int16
+    discard f
+
+proc corrStereoS16(n: int; anti = false): AudioSamples =
+  let spec = newAudioSpec(44_100, ChStereo)
+  result = newAudioSamples(sfS16, spec, n)
+  result.s16.renderWith(n, i):
+    let v = (15_000.0 * sin(2 * PI * 330.0 * i.float64 / 44100.0)).int16
+    result.s16.planes[0][i] = v
+    result.s16.planes[1][i] = if anti: (-v.int32).int16 else: v
+
+proc encodeLevel(src: AudioSamples; rate: uint32; level: int;
+    bps = 0'u32): seq[uint8] =
+  var opts = defaultFlacEncoderOptions()
+  opts.level = level
+  encodeFlacStream(src, rate, bps, opts)
+
+proc firstHeader(data: seq[uint8]): FrameHeader =
+  ## Walks file metadata to the first frame and parses its header.
+  var r = newReader(data)
+  check r.readBytesExact(4) == @[0x66'u8, 0x4c, 0x61, 0x43]
+  while true:
+    let hb = r.readByte()
+    let isLast = (hb and 0x80'u8) != 0
+    let ln = r.readU24Be().int
+    r.ignoreBytes(ln)
+    if isLast:
+      break
+  let sync = syncFrame(r)
+  readFrameHeader(r, sync)
+
+proc readStreamInfo(data: seq[uint8]): StreamInfo =
+  var r = newReader(data)
+  discard r.readBytesExact(4)
+  while true:
+    let hb = r.readByte()
+    let isLast = (hb and 0x80'u8) != 0
+    let typ = hb and 0x7f'u8
+    let ln = r.readU24Be().int
+    let body = r.readBytesExact(ln)
+    if typ == 0:
+      return parseStreamInfo(body)
+    if isLast:
+      break
+  raise newException(AssertionDefect, "no streaminfo")
+
+proc readRefS16Flac(path: string; nch: int): seq[seq[int16]] =
+  let raw = readFile(path)
+  var data = newSeq[uint8](raw.len)
+  for i, c in raw:
+    data[i] = cast[uint8](c)
+  var at = 0
+  while not (data[at] == 0x64'u8 and data[at+1] == 0x61'u8 and
+      data[at+2] == 0x74'u8 and data[at+3] == 0x61'u8):
+    inc at
+  var r = newReader(data.toOpenArray(at + 8, data.len - 1))
+  let total = (data.len - at - 8) div (2 * nch)
+  result = newSeq[seq[int16]](nch)
+  for p in 0 ..< nch:
+    result[p] = newSeq[int16](total)
+  for i in 0 ..< total:
+    for p in 0 ..< nch:
+      result[p][i] = r.readI16Le()
+
+proc readRefS32Flac(path: string; nch: int): seq[seq[int32]] =
+  let raw = readFile(path)
+  var data = newSeq[uint8](raw.len)
+  for i, c in raw:
+    data[i] = cast[uint8](c)
+  var at = 0
+  while not (data[at] == 0x64'u8 and data[at+1] == 0x61'u8 and
+      data[at+2] == 0x74'u8 and data[at+3] == 0x61'u8):
+    inc at
+  var r = newReader(data.toOpenArray(at + 8, data.len - 1))
+  let total = (data.len - at - 8) div (4 * nch)
+  result = newSeq[seq[int32]](nch)
+  for p in 0 ..< nch:
+    result[p] = newSeq[int32](total)
+  for i in 0 ..< total:
+    for p in 0 ..< nch:
+      result[p][i] = r.readI32Le()
+
+proc decodeAllS32(data: seq[uint8]; verify = false): tuple[samples:
+    seq[seq[int32]], verifyOk: Option[bool]] =
+  let w = openFlac(data)
+  var dec = newFlacDecoder(w.params,
+    AudioDecoderOptions(gapless: true, verify: verify))
+  let nch = w.params.channels.get.channelCount()
+  var got = newSeq[seq[int32]](nch)
+  for p in 0 ..< nch:
+    got[p] = @[]
+  while true:
+    let pkt = w.nextPacket()
+    if pkt.isNone:
+      break
+    let s = dec.decodePacket(pkt.get)
+    for p in 0 ..< nch:
+      for i in 0 ..< s.framesOf():
+        got[p].add(s.s32.planes[p][i])
+  (got, dec.finalize().verifyOk)
+
+suite "flac encoder options":
+  test "defaults and level tables":
+    let o = defaultFlacEncoderOptions()
+    check o.level == 5
+    check o.blockSize == 0
+    check o.variableBlock == false
+    check o.writeSeekTable == true
+    check encoderBlockSize(o) == 4096
+    check maxLpcOrder(o) == 12
+    check maxPartitionOrder(o) == 4
+    check doDecorrelate(o) == true
+    var z = defaultFlacEncoderOptions()
+    z.level = 0
+    check maxLpcOrder(z) == 0
+    check maxPartitionOrder(z) == 0
+    check doDecorrelate(z) == false
+    z.level = 8
+    check maxLpcOrder(z) == 32
+    check maxPartitionOrder(z) == 8
+
+  test "block size validation":
+    var o = defaultFlacEncoderOptions()
+    o.blockSize = 15
+    try:
+      discard encodeFlacStream(sineS16Flac(100), 44_100, 0, o)
+      check false
+    except AudioError as e:
+      check e.kind == ekUnsupported
+    o.blockSize = 70_000
+    try:
+      discard encodeFlacStream(sineS16Flac(100), 44_100, 0, o)
+      check false
+    except AudioError as e:
+      check e.kind == ekUnsupported
+    o.blockSize = 1152
+    let bytes = encodeFlacStream(sineS16Flac(3_000), 44_100, 0, o)
+    let w = openFlac(bytes)
+    var pts: seq[int64] = @[]
+    while true:
+      let pkt = w.nextPacket()
+      if pkt.isNone:
+        break
+      pts.add(pkt.get.pts.get)
+    check pts == @[0'i64, 1152, 2304]
+
+  test "empty input rejected":
+    let spec = newAudioSpec(44_100, ChStereo)
+    let empty = newAudioSamples(sfS16, spec, 0)
+    try:
+      discard encodeFlacStream(empty, 44_100)
+      check false
+    except AudioError as e:
+      check e.kind == ekUnsupported
+
+  test "ladder improves on structured signals":
+    let chirp = chirpS16(8192)
+    let c0 = encodeLevel(chirp, 44_100, 0)
+    let c5 = encodeLevel(chirp, 44_100, 5)
+    check c5.len < c0.len
+    let corr = corrStereoS16(8192)
+    let k0 = encodeLevel(corr, 44_100, 0)
+    let k1 = encodeLevel(corr, 44_100, 1)
+    check k1.len < k0.len div 2 + k0.len div 4 # ~half via mid/side
+
+suite "flac lpc estimation":
+  test "levinson-durbin on AR(1) autocorrelation":
+    let (a1, e1) = levinsonDurbin([1.0, 0.5, 0.25], 1)
+    check abs(a1[0] - 0.5) < 1e-12
+    check abs(e1 - 0.75) < 1e-12
+    let (a2, e2) = levinsonDurbin([1.0, 0.5, 0.25], 2)
+    check abs(a2[0] - 0.5) < 1e-12
+    check abs(a2[1]) < 1e-12
+    check abs(e2 - 0.75) < 1e-12
+    let (a0, e0) = levinsonDurbin([0.0, 0.0], 0)
+    check a0.len == 0
+    check e0 == 0.0
+
+  test "quantize rejects unrepresentable precision":
+    check quantizeLpc([0.0, 0.0], 12).ok == true
+    check quantizeLpc([0.0], 12).shift == 0
+    check quantizeLpc([1.5], 0).ok == false
+    check quantizeLpc([1.5], 16).ok == false
+    check quantizeLpc([100.0], 6).ok == false
+    let (ok, shift, qc) = quantizeLpc([1.5], 6)
+    check ok == true
+    check shift == 4
+    check qc == @[24'i32]
+
+  test "apodization windows":
+    var x = newSeq[int32](8)
+    for i in 0 ..< 8:
+      x[i] = 100
+    var wrect = newSeq[float64]()
+    apodize(x, akRectangular, wrect)
+    for v in wrect:
+      check v == 100.0
+    var wt = newSeq[float64]()
+    apodize(x, akTukey, wt)
+    check wt[0] == 0.0
+    check wt[4] == 100.0
+    var ww = newSeq[float64]()
+    apodize(x, akWelch, ww)
+    check abs(ww[4] - 100.0) < 1e-9
+    check ww[0] < ww[4]
+
+  test "lpc winner reconstructs exactly":
+    var s = newSeq[int32](1024)
+    for i in 0 ..< 1024:
+      s[i] = (20000.0 * sin(2 * PI * 440.0 * i.float64 /
+        44100.0)).int32
+    let (ok, order, _, shift, coeffs, res, _) = tryLpcSubframe(
+      s.toOpenArray(0, 1023), 16, 12, true, lpcWindows(5))
+    check ok == true
+    check order >= 1 and order <= 12
+    for i in order ..< order + 16:
+      var p = 0'i64
+      for j in 0 ..< order:
+        p = p +% coeffs[j].int64 * s[i - 1 - j].int64
+      check s[i] -% cast[int32](p shr shift) == res[i]
+
+  test "subframe roundtrips at levels 0, 5 and 8":
+    var s = newSeq[int32](512)
+    for i in 0 ..< 512:
+      s[i] = (20000.0 * sin(2 * PI * 440.0 * i.float64 /
+        44100.0)).int32
+    for level in [0, 5, 8]:
+      var opts = defaultFlacEncoderOptions()
+      opts.level = level
+      var bw = newBitWriter()
+      bw.encodeSubframeEx(s.toOpenArray(0, 511), 16, opts)
+      bw.flush()
+      var bs = newBitReader(bw.toBytes())
+      var back = newSeq[int32](512)
+      bs.decodeSubframe(16, back.toOpenArray(0, 511))
+      check back == s
+    # White-noise-ish block exercises Rice2/escape selection paths.
+    var nz = newSeq[int32](256)
+    var seed = 0x12345678'u32
+    for i in 0 ..< 256:
+      seed = seed * 1664525'u32 + 1013904223'u32
+      nz[i] = cast[int32]((seed shr 8) and 0xffff'u32) - 32768
+    for level in [3, 5]:
+      var opts = defaultFlacEncoderOptions()
+      opts.level = level
+      var bw = newBitWriter()
+      bw.encodeSubframeEx(nz.toOpenArray(0, 255), 16, opts)
+      bw.flush()
+      var bs = newBitReader(bw.toBytes())
+      var back = newSeq[int32](256)
+      bs.decodeSubframe(16, back.toOpenArray(0, 255))
+      check back == nz
+
+suite "flac rice coding":
+  test "chooseRice picks optimal parameter":
+    var zeros = newSeq[int32](64)
+    let z = chooseRice(zeros.toOpenArray(0, 63), true)
+    check z.escape == false
+    check z.k == 0
+    var big = newSeq[int32](64)
+    for i in 0 ..< 64:
+      big[i] = 30000
+    # Constant large residuals: the 4-bit escape (1033 bits) beats Rice
+    # k=15 (1092 bits), so escape is selected with either Rice width.
+    let re1 = chooseRice(big.toOpenArray(0, 63), true)
+    check re1.escape == true
+    check re1.width == 16
+    let re0 = chooseRice(big.toOpenArray(0, 63), false)
+    check re0.escape == true
+    check re0.width == 16
+    # Spread residuals need k > 14: Rice2 (5-bit params) is selected.
+    var spread = newSeq[int32](64)
+    for i in 0 ..< 64:
+      spread[i] = ((i + 1) * 10000).int32
+    let r5 = choosePartitions(spread.toOpenArray(0, 63), 0, 0, true)
+    check r5.method5 == true
+    check r5.choices[0].k > 14
+    let r4 = choosePartitions(spread.toOpenArray(0, 63), 0, 0, false)
+    check r4.method5 == false
+    # Extreme residuals must never select an unrepresentable escape width.
+    let x = chooseRice([high(int32), low(int32)].toOpenArray(0, 1), true)
+    check x.escape == false
+    check x.k <= 30
+    check escapeWidth(zeros.toOpenArray(0, 63)) == 1
+    check escapeWidth([100'i32].toOpenArray(0, 0)) == 8
+
+  test "ramp forces Rice2 and roundtrips":
+    # Slope-10000 fixed-1 residuals need k > 14: Rice2 must be selected.
+    var ramp = newSeq[int32](64)
+    for i in 0 ..< 64:
+      ramp[i] = (i * 10000).int32
+    let rp = choosePartitions(ramp.toOpenArray(1, 63), 1, 0, true)
+    check rp.method5 == true
+    var opts = defaultFlacEncoderOptions()
+    opts.level = 5
+    var bw = newBitWriter()
+    bw.encodeSubframeEx(ramp.toOpenArray(0, 63), 32, opts)
+    bw.flush()
+    var bs = newBitReader(bw.toBytes())
+    var back = newSeq[int32](64)
+    bs.decodeSubframe(32, back.toOpenArray(0, 63))
+    check back == ramp
+
+suite "flac stereo decorrelation":
+  test "identical channels pick left-side":
+    let src = corrStereoS16(4096)
+    var opts = defaultFlacEncoderOptions()
+    opts.level = 5
+    let bytes = encodeFlacStream(src, 44_100, 0, opts)
+    check firstHeader(bytes).assignment.kind == caLeftSide
+    let (got, ok) = decodeAllS32(bytes, true)
+    check got[0].len == 4096
+    for i in countup(0, 4095, 509):
+      check got[0][i] == src.s16.planes[0][i].int32 shl 16
+      check got[1][i] == src.s16.planes[1][i].int32 shl 16
+    check ok.get == true
+
+  test "anti-correlated channels pick mid-side":
+    let src = corrStereoS16(4096, true)
+    var opts = defaultFlacEncoderOptions()
+    opts.level = 5
+    let bytes = encodeFlacStream(src, 44_100, 0, opts)
+    check firstHeader(bytes).assignment.kind == caMidSide
+    let (got, ok) = decodeAllS32(bytes, true)
+    for i in countup(0, 4095, 509):
+      check got[0][i] == src.s16.planes[0][i].int32 shl 16
+      check got[1][i] == src.s16.planes[1][i].int32 shl 16
+    check ok.get == true
+
+suite "flac full headers":
+  test "explicit rate and depth codings":
+    let src = sineS16Flac(3000)
+    check firstHeader(encodeFlacStream(src, 44_100)).sampleRate.get ==
+      44_100
+    check firstHeader(encodeFlacStream(src, 44_100)).bitsPerSample.get ==
+      16
+    var o32 = defaultFlacEncoderOptions()
+    o32.level = 1
+    let spec32 = newAudioSpec(48_000, ChMono)
+    var s32 = newAudioSamples(sfS32, spec32, 2000)
+    s32.s32.renderWith(2000, i):
+      s32.s32.planes[0][i] = (1_000_000_000.0 *
+        sin(2 * PI * 440.0 * i.float64 / 48000.0)).int32
+    let b32 = encodeFlacStream(s32, 48_000, 32, o32)
+    check firstHeader(b32).bitsPerSample.get == 32
+    let back32 = decodeAllS32(b32)
+    check back32.samples[0].len == 2000
+    for i in countup(0, 1999, 401):
+      check back32.samples[0][i] == s32.s32.planes[0][i]
+
+  test "32-bit stereo stays independent":
+    # The side channel would need 33 bits (unrepresentable), so 32-bit
+    # stereo must encode independent channels (used to crash the writer).
+    let spec = newAudioSpec(96_000, ChStereo)
+    var s32 = newAudioSamples(sfS32, spec, 1024)
+    s32.s32.renderWith(1024, i):
+      s32.s32.planes[0][i] = (1_000_000_000.0 *
+        sin(2 * PI * 440.0 * i.float64 / 96000.0)).int32
+      s32.s32.planes[1][i] = (1_000_000_000.0 *
+        sin(2 * PI * 880.0 * i.float64 / 96000.0)).int32
+    var o = defaultFlacEncoderOptions()
+    o.level = 5
+    let bytes = encodeFlacStream(s32, 96_000, 32, o)
+    check firstHeader(bytes).assignment.kind == caIndependent
+    let (got, ok) = decodeAllS32(bytes, true)
+    check got[0].len == 1024
+    for i in countup(0, 1023, 257):
+      check got[0][i] == s32.s32.planes[0][i]
+      check got[1][i] == s32.s32.planes[1][i]
+    check ok.get == true
+
+  test "uncommon sample rate":
+    let src = chirpS16(3000, 12_000)
+    var o = defaultFlacEncoderOptions()
+    o.level = 1
+    let bytes = encodeFlacStream(src, 12_000, 0, o)
+    check firstHeader(bytes).sampleRate.get == 12_000
+    let (got, ok) = decodeAllS32(bytes, true)
+    check got[0].len == 3000
+    for i in countup(0, 2999, 601):
+      check got[0][i] == src.s16.planes[0][i].int32 shl 16
+    check ok.get == true
+
+  test "odd bit depth":
+    let spec = newAudioSpec(44_100, ChMono)
+    var s32 = newAudioSamples(sfS32, spec, 1500)
+    s32.s32.renderWith(1500, i):
+      s32.s32.planes[0][i] = (400_000.0 *
+        sin(2 * PI * 440.0 * i.float64 / 44100.0)).int32
+    var o = defaultFlacEncoderOptions()
+    o.level = 1
+    let bytes = encodeFlacStream(s32, 44_100, 20, o)
+    check firstHeader(bytes).bitsPerSample.get == 20
+    let (got, ok) = decodeAllS32(bytes, true)
+    check got[0].len == 1500
+    for i in countup(0, 1499, 401):
+      # Decoder output is MSB-aligned; low 12 bits are not stored.
+      check got[0][i] == (s32.s32.planes[0][i] shr 12) shl 12
+    check ok.get == true
+
+  test "variable block size roundtrip with seek":
+    var o = defaultFlacEncoderOptions()
+    o.level = 2
+    o.variableBlock = true
+    let src = sineS16Flac(5_000)
+    let bytes = encodeFlacStream(src, 44_100, 0, o)
+    let w = openFlac(bytes)
+    check w.numFrames().get == 5_000
+    var total = 0'u64
+    var pts: seq[int64] = @[]
+    while true:
+      let pkt = w.nextPacket()
+      if pkt.isNone:
+        break
+      pts.add(pkt.get.pts.get)
+      total += pkt.get.dur.get
+    check total == 5_000
+    check pts == @[0'i64, 4096]
+    let s = w.seek(seekToTimestamp(newTimestamp(4096), 0))
+    check s.actualTs.get == 4096
+    let (got, ok) = decodeAllS32(bytes, true)
+    for i in countup(0, 4999, 997):
+      check got[0][i] == src.s16.planes[0][i].int32 shl 16
+      check got[1][i] == src.s16.planes[1][i].int32 shl 16
+    check ok.get == true
+
+  test "tiny input and short tail":
+    var o = defaultFlacEncoderOptions()
+    o.level = 1
+    let src = sineS16Flac(100)
+    let bytes = encodeFlacStream(src, 44_100, 0, o)
+    let (got, ok) = decodeAllS32(bytes, true)
+    check got[0].len == 100
+    for i in 0 ..< 100:
+      check got[0][i] == src.s16.planes[0][i].int32 shl 16
+    check ok.get == true
+
+  test "streaminfo carries real sizes and md5":
+    let src = sineS16Flac(9_000)
+    var o = defaultFlacEncoderOptions()
+    o.level = 1
+    let info = readStreamInfo(encodeFlacStream(src, 44_100, 0, o))
+    check info.blockLenMin == 4096
+    check info.blockLenMax == 4096
+    check info.frameByteLenMin > 0
+    check info.frameByteLenMax >= info.frameByteLenMin
+    check info.nSamples.get == 9_000
+    check info.md5.isSome
+
+  test "frame sequence 0xfe is rejected, not hung":
+    var r = newReader(@[0x69'u8, 0x08, 0xfe])
+    try:
+      discard readFrameHeader(r, 0xfff8'u16)
+      check false
+    except AudioError as e:
+      check e.kind == ekDecode
+
+suite "flac encoder ratios":
+  test "lpc beats fixed on mixed tones":
+    let src = sineS16Flac(11_025)
+    let b0 = encodeLevel(src, 44_100, 0)
+    let b5 = encodeLevel(src, 44_100, 5)
+    check b5.len < b0.len
+    check b5.len <= (b0.len * 9) div 10
+
+  test "level 8 tiny vector is lossless":
+    var s = newSeq[int32](512)
+    for i in 0 ..< 512:
+      s[i] = (20000.0 * sin(2 * PI * 440.0 * i.float64 /
+        44100.0)).int32
+    var opts = defaultFlacEncoderOptions()
+    opts.level = 8
+    var bw = newBitWriter()
+    bw.encodeSubframeEx(s.toOpenArray(0, 511), 16, opts)
+    bw.flush()
+    var bs = newBitReader(bw.toBytes())
+    var back = newSeq[int32](512)
+    bs.decodeSubframe(16, back.toOpenArray(0, 511))
+    check back == s
+
+suite "flac cli interop":
+  test "reference -5 file decodes bit-exact":
+    let data = readFileBytes("tests/fixtures/fix_flac_cli5.flac")
+    let (got, ok) = decodeAllS32(data, true)
+    check got[0].len == 44_100
+    let refs = readRefS16Flac(
+      "tests/fixtures/ref_flac_cli5_dec.wav", 2)
+    for i in countup(0, 44_099, 997):
+      check got[0][i] == refs[0][i].int32 shl 16
+      check got[1][i] == refs[1][i].int32 shl 16
+    check ok.get == true
+
+  test "reference --lax file decodes bit-exact":
+    let data = readFileBytes("tests/fixtures/fix_flac_lax.flac")
+    let (got, ok) = decodeAllS32(data, true)
+    check got[0].len == 44_100
+    let refs = readRefS16Flac(
+      "tests/fixtures/ref_flac_lax_dec.wav", 2)
+    for i in countup(0, 44_099, 997):
+      check got[0][i] == refs[0][i].int32 shl 16
+      check got[1][i] == refs[1][i].int32 shl 16
+    check ok.get == true
+
+  test "reference noise file decodes bit-exact":
+    let data = readFileBytes("tests/fixtures/fix_flac_noise.flac")
+    let (got, ok) = decodeAllS32(data, true)
+    check got[0].len == 22_050
+    let refs = readRefS16Flac(
+      "tests/fixtures/ref_flac_noise_dec.wav", 1)
+    for i in countup(0, 22_049, 997):
+      check got[0][i] == refs[0][i].int32 shl 16
+    check ok.get == true
+
+  test "reference 96k 32-bit -8 file decodes bit-exact":
+    let data = readFileBytes("tests/fixtures/fix_flac_cli8_96k32.flac")
+    let w = openFlac(data)
+    check w.params.sampleRate.get == 96_000
+    check w.params.bitsPerSample.get == 32
+    check w.params.channels.get.channelCount() == 2
+    let (got, ok) = decodeAllS32(data, true)
+    check got[0].len == 48_000
+    let refs = readRefS32Flac(
+      "tests/fixtures/ref_flac_cli8_96k32_dec.wav", 2)
+    for i in countup(0, 47_999, 1201):
+      check got[0][i] == refs[0][i]
+      check got[1][i] == refs[1][i]
+    check ok.get == true
