@@ -1,0 +1,102 @@
+nimTitle	units	audio/units.html	module audio/units		0
+nim	Timestamp	audio/units.html#Timestamp	object Timestamp		16
+nim	Duration	audio/units.html#Duration	object Duration		20
+nim	Delta	audio/units.html#Delta	object Delta		24
+nim	Time	audio/units.html#Time	object Time		28
+nim	TimeBase	audio/units.html#TimeBase	object TimeBase		33
+nim	NsPerSec	audio/units.html#NsPerSec	const NsPerSec		39
+nim	ZeroTimestamp	audio/units.html#ZeroTimestamp	const ZeroTimestamp		40
+nim	ZeroDuration	audio/units.html#ZeroDuration	const ZeroDuration		41
+nim	ZeroTime	audio/units.html#ZeroTime	const ZeroTime		42
+nim	newTimestamp	audio/units.html#newTimestamp,int64	proc newTimestamp(ts: int64): Timestamp		46
+nim	get	audio/units.html#get,Timestamp	proc get(t: Timestamp): int64		47
+nim	isZero	audio/units.html#isZero,Timestamp	proc isZero(t: Timestamp): bool		48
+nim	isNegative	audio/units.html#isNegative,Timestamp	proc isNegative(t: Timestamp): bool		49
+nim	isPositive	audio/units.html#isPositive,Timestamp	proc isPositive(t: Timestamp): bool		50
+nim	`==`	audio/units.html#==,Timestamp,Timestamp	proc `==`(a, b: Timestamp): bool		51
+nim	`<`	audio/units.html#<,Timestamp,Timestamp	proc `<`(a, b: Timestamp): bool		52
+nim	`$`	audio/units.html#$,Timestamp	proc `$`(t: Timestamp): string		53
+nim	checkedAdd	audio/units.html#checkedAdd,Timestamp,Duration	proc checkedAdd(t: Timestamp; d: Duration): Option[Timestamp]		86
+nim	checkedSub	audio/units.html#checkedSub,Timestamp,Duration	proc checkedSub(t: Timestamp; d: Duration): Option[Timestamp]		90
+nim	saturatingAdd	audio/units.html#saturatingAdd,Timestamp,Duration	proc saturatingAdd(t: Timestamp; d: Duration): Timestamp		106
+nim	saturatingSub	audio/units.html#saturatingSub,Timestamp,Duration	proc saturatingSub(t: Timestamp; d: Duration): Timestamp		109
+nim	checkedDelta	audio/units.html#checkedDelta,Timestamp,Timestamp	proc checkedDelta(a, b: Timestamp): Option[Delta]		112
+nim	saturatingDelta	audio/units.html#saturatingDelta,Timestamp,Timestamp	proc saturatingDelta(a, b: Timestamp): Delta		119
+nim	checkedAddDelta	audio/units.html#checkedAddDelta,Timestamp,Delta	proc checkedAddDelta(t: Timestamp; d: Delta): Option[Timestamp]		126
+nim	absDelta	audio/units.html#absDelta,Timestamp,Timestamp	proc absDelta(a, b: Timestamp): Duration		133
+nim	durationFrom	audio/units.html#durationFrom,Timestamp,Timestamp	proc durationFrom(a, b: Timestamp): Option[Duration]		145
+nim	durationTo	audio/units.html#durationTo,Timestamp,Timestamp	proc durationTo(a, b: Timestamp): Option[Duration]		150
+nim	alignTowardsZero	audio/units.html#alignTowardsZero,Timestamp,Duration	proc alignTowardsZero(t: Timestamp; alignTo: Duration): Option[Timestamp]		152
+nim	alignDown	audio/units.html#alignDown,Timestamp,Duration	proc alignDown(t: Timestamp; alignTo: Duration): Option[Timestamp]		158
+nim	newDuration	audio/units.html#newDuration,uint64	proc newDuration(d: uint64): Duration		166
+nim	get	audio/units.html#get,Duration	proc get(d: Duration): uint64		167
+nim	isZero	audio/units.html#isZero,Duration	proc isZero(d: Duration): bool		168
+nim	`==`	audio/units.html#==,Duration,Duration	proc `==`(a, b: Duration): bool		169
+nim	`<`	audio/units.html#<,Duration,Duration	proc `<`(a, b: Duration): bool		170
+nim	`$`	audio/units.html#$,Duration	proc `$`(d: Duration): string		171
+nim	checkedAdd	audio/units.html#checkedAdd,Duration,Duration	proc checkedAdd(a, b: Duration): Option[Duration]		173
+nim	checkedSub	audio/units.html#checkedSub,Duration,Duration	proc checkedSub(a, b: Duration): Option[Duration]		177
+nim	checkedMul	audio/units.html#checkedMul,Duration,uint64	proc checkedMul(a: Duration; rhs: uint64): Option[Duration]		180
+nim	checkedDiv	audio/units.html#checkedDiv,Duration,uint64	proc checkedDiv(a: Duration; rhs: uint64): Option[Duration]		184
+nim	saturatingAdd	audio/units.html#saturatingAdd,Duration,Duration	proc saturatingAdd(a, b: Duration): Duration		187
+nim	saturatingSub	audio/units.html#saturatingSub,Duration,Duration	proc saturatingSub(a, b: Duration): Duration		191
+nim	saturatingMul	audio/units.html#saturatingMul,Duration,uint64	proc saturatingMul(a: Duration; rhs: uint64): Duration		195
+nim	alignTowardsZero	audio/units.html#alignTowardsZero,Duration,Duration	proc alignTowardsZero(d, alignTo: Duration): Option[Duration]		199
+nim	alignDown	audio/units.html#alignDown,Duration,Duration	proc alignDown(d, alignTo: Duration): Option[Duration]		203
+nim	timestampFrom	audio/units.html#timestampFrom,Duration,Timestamp	proc timestampFrom(d: Duration; frm: Timestamp): Option[Timestamp]		205
+nim	newDelta	audio/units.html#newDelta,int64	proc newDelta(d: int64): Delta		210
+nim	get	audio/units.html#get,Delta	proc get(d: Delta): int64		211
+nim	isZero	audio/units.html#isZero,Delta	proc isZero(d: Delta): bool		212
+nim	isNegative	audio/units.html#isNegative,Delta	proc isNegative(d: Delta): bool		213
+nim	isPositive	audio/units.html#isPositive,Delta	proc isPositive(d: Delta): bool		214
+nim	`$`	audio/units.html#$,Delta	proc `$`(d: Delta): string		215
+nim	tryNewTime	audio/units.html#tryNewTime,int64,uint32	proc tryNewTime(s: int64; ns: uint32): Option[Time]		219
+nim	newTime	audio/units.html#newTime,int64,uint32	proc newTime(s: int64; ns: uint32): Time		222
+nim	fromNanos	audio/units.html#fromNanos,int64	proc fromNanos(totalNs: int64): Time		227
+nim	fromNanosU64	audio/units.html#fromNanosU64,uint64	proc fromNanosU64(totalNs: uint64): Time		231
+nim	fromMicros	audio/units.html#fromMicros,int64	proc fromMicros(totalUs: int64): Time		235
+nim	fromMillis	audio/units.html#fromMillis,int64	proc fromMillis(totalMs: int64): Time		239
+nim	fromSs	audio/units.html#fromSs,uint8,uint32	proc fromSs(s: uint8; ns: uint32): Option[Time]		243
+nim	fromMmss	audio/units.html#fromMmss,uint8,uint8,uint32	proc fromMmss(m, s: uint8; ns: uint32): Option[Time]		247
+nim	fromHhmmss	audio/units.html#fromHhmmss,uint32,uint8,uint8,uint32	proc fromHhmmss(h: uint32; m, s: uint8; ns: uint32): Option[Time]		251
+nim	isZero	audio/units.html#isZero,Time	proc isZero(t: Time): bool		255
+nim	isPositive	audio/units.html#isPositive,Time	proc isPositive(t: Time): bool		256
+nim	isNegative	audio/units.html#isNegative,Time	proc isNegative(t: Time): bool		257
+nim	asNanos	audio/units.html#asNanos,Time	proc asNanos(t: Time): int64		259
+nim	asMicros	audio/units.html#asMicros,Time	proc asMicros(t: Time): int64		271
+nim	asMillis	audio/units.html#asMillis,Time	proc asMillis(t: Time): int64		272
+nim	asSecs	audio/units.html#asSecs,Time	proc asSecs(t: Time): int64		274
+nim	asSecsF64	audio/units.html#asSecsF64,Time	proc asSecsF64(t: Time): float64		277
+nim	parts	audio/units.html#parts,Time	proc parts(t: Time): tuple[seconds: int64, nanos: uint32]		279
+nim	checkedNeg	audio/units.html#checkedNeg,Time	proc checkedNeg(t: Time): Option[Time]		288
+nim	checkedAddNanos	audio/units.html#checkedAddNanos,Time,int64	proc checkedAddNanos(t: Time; ns: int64): Option[Time]		311
+nim	checkedSubNanos	audio/units.html#checkedSubNanos,Time,int64	proc checkedSubNanos(t: Time; ns: int64): Option[Time]		314
+nim	checkedAddMillis	audio/units.html#checkedAddMillis,Time,int64	proc checkedAddMillis(t: Time; ms: int64): Option[Time]		320
+nim	checkedSubMillis	audio/units.html#checkedSubMillis,Time,int64	proc checkedSubMillis(t: Time; ms: int64): Option[Time]		323
+nim	checkedAddSecs	audio/units.html#checkedAddSecs,Time,int64	proc checkedAddSecs(t: Time; s: int64): Option[Time]		330
+nim	checkedSubSecs	audio/units.html#checkedSubSecs,Time,int64	proc checkedSubSecs(t: Time; s: int64): Option[Time]		331
+nim	defaultTimeBase	audio/units.html#defaultTimeBase	proc defaultTimeBase(): TimeBase		336
+nim	tryNewTimeBase	audio/units.html#tryNewTimeBase,uint32,uint32	proc tryNewTimeBase(numer, denom: uint32): Option[TimeBase]		338
+nim	tryFromRecip	audio/units.html#tryFromRecip,uint32	proc tryFromRecip(rate: uint32): Option[TimeBase]		342
+nim	toFloat64	audio/units.html#toFloat64,TimeBase	proc toFloat64(tb: TimeBase): float64		345
+nim	`$`	audio/units.html#$,TimeBase	proc `$`(tb: TimeBase): string		348
+nim	calcTime	audio/units.html#calcTime,TimeBase,Timestamp	proc calcTime(tb: TimeBase; ts: Timestamp): Option[Time]		369
+nim	calcTimeSaturating	audio/units.html#calcTimeSaturating,TimeBase,Timestamp	proc calcTimeSaturating(tb: TimeBase; ts: Timestamp): Time		394
+nim	calcDuration	audio/units.html#calcDuration,TimeBase,Duration	proc calcDuration(tb: TimeBase; d: Duration): Option[Time]		400
+nim	calcDurationSaturating	audio/units.html#calcDurationSaturating,TimeBase,Duration	proc calcDurationSaturating(tb: TimeBase; d: Duration): Time		409
+nim	calcTimestamp	audio/units.html#calcTimestamp,TimeBase,Time	proc calcTimestamp(tb: TimeBase; t: Time): Option[Timestamp]		413
+nim	scale	audio/units.html#scale,TimeBase,float64	proc scale(tb: TimeBase; factor: float64): Option[TimeBase]		434
+nim	reduce	audio/units.html#reduce,TimeBase	proc reduce(tb: TimeBase): TimeBase		454
+nimgrp	saturatingsub	audio/units.html#saturatingSub-procs-all	proc		109
+nimgrp	<	audio/units.html#<-procs-all	proc		52
+nimgrp	aligntowardszero	audio/units.html#alignTowardsZero-procs-all	proc		152
+nimgrp	saturatingadd	audio/units.html#saturatingAdd-procs-all	proc		106
+nimgrp	==	audio/units.html#==-procs-all	proc		51
+nimgrp	$	audio/units.html#$-procs-all	proc		53
+nimgrp	isnegative	audio/units.html#isNegative-procs-all	proc		49
+nimgrp	checkedadd	audio/units.html#checkedAdd-procs-all	proc		86
+nimgrp	iszero	audio/units.html#isZero-procs-all	proc		48
+nimgrp	ispositive	audio/units.html#isPositive-procs-all	proc		50
+nimgrp	get	audio/units.html#get-procs-all	proc		47
+nimgrp	checkedsub	audio/units.html#checkedSub-procs-all	proc		90
+nimgrp	aligndown	audio/units.html#alignDown-procs-all	proc		158

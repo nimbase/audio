@@ -1,0 +1,14 @@
+nimTitle	ogg	audio/formats/ogg.html	module audio/formats/ogg		0
+nim	OggFormatInfo	audio/formats/ogg.html#OggFormatInfo	const OggFormatInfo		29
+nim	OggPage	audio/formats/ogg.html#OggPage	object OggPage		35
+nim	OggPacket	audio/formats/ogg.html#OggPacket	object OggPacket		45
+nim	VorbisDurParser	audio/formats/ogg.html#VorbisDurParser	object VorbisDurParser		57
+nim	OggReader	audio/formats/ogg.html#OggReader	type OggReader		84
+nim	probeOgg	audio/formats/ogg.html#probeOgg,openArray[uint8]	proc probeOgg(data: openArray[uint8]): int		98
+nim	openOgg	audio/formats/ogg.html#openOgg,seq[uint8]	proc openOgg(data: seq[uint8]): OggReader		202
+nim	trackCount	audio/formats/ogg.html#trackCount,OggReader	proc trackCount(w: OggReader): int		391
+nim	mediaInfo	audio/formats/ogg.html#mediaInfo,OggReader	proc mediaInfo(w: OggReader): MediaInfo		393
+nim	numFrames	audio/formats/ogg.html#numFrames,OggReader	proc numFrames(w: OggReader): Option[uint64]		397
+nim	packetBytes	audio/formats/ogg.html#packetBytes,OggReader,OggPacket	proc packetBytes(w: OggReader; p: OggPacket): seq[uint8]		399
+nim	nextPacket	audio/formats/ogg.html#nextPacket,OggReader	proc nextPacket(w: OggReader): Option[Packet]		405
+nim	seek	audio/formats/ogg.html#seek,OggReader,SeekTo	proc seek(w: OggReader; to: SeekTo): SeekedTo		423

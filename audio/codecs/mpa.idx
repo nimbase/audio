@@ -1,0 +1,126 @@
+nimTitle	mpa	audio/codecs/mpa.html	module audio/codecs/mpa		0
+nim	Mpeg2p5	audio/codecs/mpa.html#Mpeg2p5	MpegVersion.Mpeg2p5		22
+nim	Mpeg2	audio/codecs/mpa.html#Mpeg2	MpegVersion.Mpeg2		22
+nim	Mpeg1	audio/codecs/mpa.html#Mpeg1	MpegVersion.Mpeg1		22
+nim	MpegVersion	audio/codecs/mpa.html#MpegVersion	enum MpegVersion		22
+nim	Layer1	audio/codecs/mpa.html#Layer1	MpegLayer.Layer1		27
+nim	Layer2	audio/codecs/mpa.html#Layer2	MpegLayer.Layer2		27
+nim	Layer3	audio/codecs/mpa.html#Layer3	MpegLayer.Layer3		27
+nim	MpegLayer	audio/codecs/mpa.html#MpegLayer	enum MpegLayer		27
+nim	mmStereo	audio/codecs/mpa.html#mmStereo	MpaModeKind.mmStereo		32
+nim	mmDualMono	audio/codecs/mpa.html#mmDualMono	MpaModeKind.mmDualMono		32
+nim	mmMono	audio/codecs/mpa.html#mmMono	MpaModeKind.mmMono		32
+nim	mmJoint	audio/codecs/mpa.html#mmJoint	MpaModeKind.mmJoint		32
+nim	MpaModeKind	audio/codecs/mpa.html#MpaModeKind	enum MpaModeKind		32
+nim	MpaMode	audio/codecs/mpa.html#MpaMode	object MpaMode		38
+nim	FrameHeader	audio/codecs/mpa.html#FrameHeader	object FrameHeader		47
+nim	MpegHeaderLen	audio/codecs/mpa.html#MpegHeaderLen	const MpegHeaderLen		58
+nim	MaxMpegFrameSize	audio/codecs/mpa.html#MaxMpegFrameSize	const MaxMpegFrameSize		59
+nim	BitRatesMpeg1L1	audio/codecs/mpa.html#BitRatesMpeg1L1	const BitRatesMpeg1L1		61
+nim	BitRatesMpeg1L2	audio/codecs/mpa.html#BitRatesMpeg1L2	const BitRatesMpeg1L2		64
+nim	BitRatesMpeg1L3	audio/codecs/mpa.html#BitRatesMpeg1L3	const BitRatesMpeg1L3		67
+nim	BitRatesMpeg2L1	audio/codecs/mpa.html#BitRatesMpeg2L1	const BitRatesMpeg2L1		70
+nim	BitRatesMpeg2L23	audio/codecs/mpa.html#BitRatesMpeg2L23	const BitRatesMpeg2L23		73
+nim	isFrameSynced	audio/codecs/mpa.html#isFrameSynced,uint32	proc isFrameSynced(w: uint32): bool		77
+nim	checkHeader	audio/codecs/mpa.html#checkHeader,uint32	proc checkHeader(h: uint32): bool		80
+nim	isMono	audio/codecs/mpa.html#isMono,MpaMode	proc isMono(m: MpaMode): bool		92
+nim	numChannels	audio/codecs/mpa.html#numChannels,MpaMode	proc numChannels(m: MpaMode): int		94
+nim	channelsOf	audio/codecs/mpa.html#channelsOf,MpaMode	proc channelsOf(m: MpaMode): Channels		97
+nim	isMpeg1	audio/codecs/mpa.html#isMpeg1,FrameHeader	proc isMpeg1(h: FrameHeader): bool		101
+nim	isMpeg2p5	audio/codecs/mpa.html#isMpeg2p5,FrameHeader	proc isMpeg2p5(h: FrameHeader): bool		103
+nim	nGranules	audio/codecs/mpa.html#nGranules,FrameHeader	proc nGranules(h: FrameHeader): int		105
+nim	nChannels	audio/codecs/mpa.html#nChannels,FrameHeader	proc nChannels(h: FrameHeader): int		108
+nim	numFrames	audio/codecs/mpa.html#numFrames,FrameHeader	proc numFrames(h: FrameHeader): int		110
+nim	headerSize	audio/codecs/mpa.html#headerSize,FrameHeader	proc headerSize(h: FrameHeader): int		116
+nim	sideInfoLen	audio/codecs/mpa.html#sideInfoLen,FrameHeader	proc sideInfoLen(h: FrameHeader): int		119
+nim	codecOfLayer	audio/codecs/mpa.html#codecOfLayer,MpegLayer	proc codecOfLayer(l: MpegLayer): AudioCodecId		125
+nim	specOfHeader	audio/codecs/mpa.html#specOfHeader,FrameHeader	proc specOfHeader(h: FrameHeader): AudioSpec		131
+nim	parseFrameHeader	audio/codecs/mpa.html#parseFrameHeader,uint32	proc parseFrameHeader(word: uint32): FrameHeader		134
+nim	isSimilar	audio/codecs/mpa.html#isSimilar,FrameHeader,uint32	proc isSimilar(a: FrameHeader; word: uint32): bool		240
+nim	SynthState	audio/codecs/mpa.html#SynthState	object SynthState		257
+nim	dct32	audio/codecs/mpa.html#dct32,openArray[float32],openArray[float32]	proc dct32(x: openArray[float32]; y: var openArray[float32])		260
+nim	synthesis	audio/codecs/mpa.html#synthesis,SynthState,int,openArray[float32],openArray[float32]	proc synthesis(state: var SynthState; nFrames: int; samples: openArray[float32];\n          output: var openArray[float32])		671
+nim	decodeLayer1Frame	audio/codecs/mpa.html#decodeLayer1Frame,FrameHeader,openArray[uint8],array[,SynthState],AudioSamples	proc decodeLayer1Frame(header: FrameHeader; body: openArray[uint8];\n                  synth: var array[2, SynthState]; buf: var AudioSamples)		720
+nim	QuantClass	audio/codecs/mpa.html#QuantClass	object QuantClass		784
+nim	QuantClasses	audio/codecs/mpa.html#QuantClasses	const QuantClasses		791
+nim	SbQuantClasses0	audio/codecs/mpa.html#SbQuantClasses0	const SbQuantClasses0		812
+nim	SbQuantClasses1	audio/codecs/mpa.html#SbQuantClasses1	const SbQuantClasses1		813
+nim	SbQuantClasses2	audio/codecs/mpa.html#SbQuantClasses2	const SbQuantClasses2		814
+nim	SbQuantClasses3	audio/codecs/mpa.html#SbQuantClasses3	const SbQuantClasses3		815
+nim	SbQuantClasses4	audio/codecs/mpa.html#SbQuantClasses4	const SbQuantClasses4		816
+nim	SbQuantClasses5	audio/codecs/mpa.html#SbQuantClasses5	const SbQuantClasses5		817
+nim	SbQuantClasses6	audio/codecs/mpa.html#SbQuantClasses6	const SbQuantClasses6		818
+nim	SbQuantClasses7	audio/codecs/mpa.html#SbQuantClasses7	const SbQuantClasses7		819
+nim	SbInfoSblimit	audio/codecs/mpa.html#SbInfoSblimit	const SbInfoSblimit		820
+nim	SbInfoBands0	audio/codecs/mpa.html#SbInfoBands0	const SbInfoBands0		821
+nim	SbInfoBands1	audio/codecs/mpa.html#SbInfoBands1	const SbInfoBands1		822
+nim	SbInfoBands2	audio/codecs/mpa.html#SbInfoBands2	const SbInfoBands2		823
+nim	SbInfoBands3	audio/codecs/mpa.html#SbInfoBands3	const SbInfoBands3		824
+nim	SbInfoBands4	audio/codecs/mpa.html#SbInfoBands4	const SbInfoBands4		825
+nim	decodeLayer2Frame	audio/codecs/mpa.html#decodeLayer2Frame,FrameHeader,openArray[uint8],array[,SynthState],AudioSamples	proc decodeLayer2Frame(header: FrameHeader; body: openArray[uint8];\n                  synth: var array[2, SynthState]; buf: var AudioSamples)		883
+nim	btLong	audio/codecs/mpa.html#btLong	BlockTypeKind.btLong		971
+nim	btStart	audio/codecs/mpa.html#btStart	BlockTypeKind.btStart		971
+nim	btShort	audio/codecs/mpa.html#btShort	BlockTypeKind.btShort		971
+nim	btEnd	audio/codecs/mpa.html#btEnd	BlockTypeKind.btEnd		971
+nim	BlockTypeKind	audio/codecs/mpa.html#BlockTypeKind	enum BlockTypeKind		971
+nim	BlockType	audio/codecs/mpa.html#BlockType	object BlockType		977
+nim	GranuleChannel	audio/codecs/mpa.html#GranuleChannel	object GranuleChannel		984
+nim	MpaReservoir	audio/codecs/mpa.html#MpaReservoir	object MpaReservoir		1000
+nim	Layer3State	audio/codecs/mpa.html#Layer3State	object Layer3State		1005
+nim	ScaleFactorSlen	audio/codecs/mpa.html#ScaleFactorSlen	const ScaleFactorSlen		1012
+nim	ScaleFactorMpeg2Nsfb	audio/codecs/mpa.html#ScaleFactorMpeg2Nsfb	const ScaleFactorMpeg2Nsfb		1016
+nim	PreEmphasis	audio/codecs/mpa.html#PreEmphasis	const PreEmphasis		1024
+nim	ImdctScale36	audio/codecs/mpa.html#ImdctScale36	const ImdctScale36		1026
+nim	SdctScale9	audio/codecs/mpa.html#SdctScale9	const SdctScale9		1034
+nim	SdctD9	audio/codecs/mpa.html#SdctD9	const SdctD9		1039
+nim	mpaPow43	audio/codecs/mpa.html#mpaPow43	var mpaPow43		1046
+nim	mpaVlcTables	audio/codecs/mpa.html#mpaVlcTables	var mpaVlcTables		1048
+nim	mpaVlcQuads	audio/codecs/mpa.html#mpaVlcQuads	var mpaVlcQuads		1049
+nim	mpaRatioMpeg1	audio/codecs/mpa.html#mpaRatioMpeg1	var mpaRatioMpeg1		1051
+nim	mpaRatioMpeg2	audio/codecs/mpa.html#mpaRatioMpeg2	var mpaRatioMpeg2		1052
+nim	mpaImdctWin	audio/codecs/mpa.html#mpaImdctWin	var mpaImdctWin		1053
+nim	mpaCos12	audio/codecs/mpa.html#mpaCos12	var mpaCos12		1054
+nim	mpaAntialiasCs	audio/codecs/mpa.html#mpaAntialiasCs	var mpaAntialiasCs		1055
+nim	mpaAntialiasCa	audio/codecs/mpa.html#mpaAntialiasCa	var mpaAntialiasCa		1056
+nim	initMpaTables	audio/codecs/mpa.html#initMpaTables	proc initMpaTables()		1062
+nim	FrameData	audio/codecs/mpa.html#FrameData	object FrameData		1168
+nim	defaultGranuleChannel	audio/codecs/mpa.html#defaultGranuleChannel	proc defaultGranuleChannel(): GranuleChannel		1173
+nim	readGranuleChannelSideInfo	audio/codecs/mpa.html#readGranuleChannelSideInfo,LtrBitReader,GranuleChannel,FrameHeader	proc readGranuleChannelSideInfo(bs: var LtrBitReader; ch: var GranuleChannel;\n                           header: FrameHeader)		1180
+nim	readSideInfo	audio/codecs/mpa.html#readSideInfo,LtrBitReader,FrameHeader,FrameData	proc readSideInfo(bs: var LtrBitReader; header: FrameHeader; frame: var FrameData): int		1233
+nim	readScaleFactorsMpeg1	audio/codecs/mpa.html#readScaleFactorsMpeg1,LtrBitReader,int,int,FrameData	proc readScaleFactorsMpeg1(bs: var LtrBitReader; gr, ch: int; frame: var FrameData): int		1260
+nim	readScaleFactorsMpeg2	audio/codecs/mpa.html#readScaleFactorsMpeg2,LtrBitReader,bool,GranuleChannel	proc readScaleFactorsMpeg2(bs: var LtrBitReader; isIntensity: bool;\n                      ch: var GranuleChannel): int		1290
+nim	readHuffmanSamples	audio/codecs/mpa.html#readHuffmanSamples,LtrBitReader,GranuleChannel,int,openArray[float32]	proc readHuffmanSamples(bs: var LtrBitReader; ch: GranuleChannel; part3bits: int;\n                   buf: var openArray[float32]): int		1341
+nim	requantizeLong	audio/codecs/mpa.html#requantizeLong,GranuleChannel,openArray[int],openArray[float32]	proc requantizeLong(ch: GranuleChannel; bands: openArray[int];\n               buf: var openArray[float32])		1466
+nim	requantizeShort	audio/codecs/mpa.html#requantizeShort,GranuleChannel,openArray[int],int,openArray[float32]	proc requantizeShort(ch: GranuleChannel; bands: openArray[int]; switch: int;\n                buf: var openArray[float32])		1486
+nim	requantize	audio/codecs/mpa.html#requantize,FrameHeader,GranuleChannel,openArray[float32]	proc requantize(header: FrameHeader; ch: GranuleChannel; buf: var openArray[float32])		1505
+nim	zeroSamples	audio/codecs/mpa.html#zeroSamples,openArray[float32]	proc zeroSamples(buf: var openArray[float32])		1520
+nim	processMidSide	audio/codecs/mpa.html#processMidSide,openArray[float32],openArray[float32]	proc processMidSide(m, s: var openArray[float32])		1526
+nim	processIntensity	audio/codecs/mpa.html#processIntensity,int,bool,int,int,bool,openArray[float32],openArray[float32]	proc processIntensity(pos: int; mpeg1: bool; sfcBit: int; maxPos: int; midSide: bool;\n                 ch0, ch1: var openArray[float32])		1534
+nim	isZeroBand	audio/codecs/mpa.html#isZeroBand,openArray[float32]	proc isZeroBand(band: openArray[float32]): bool		1551
+nim	processIntensityLong	audio/codecs/mpa.html#processIntensityLong,FrameHeader,array[,GranuleChannel],bool,int,openArray[float32],openArray[float32]	proc processIntensityLong(header: FrameHeader; granule: array[2, GranuleChannel];\n                     midSide: bool; maxBound: int;\n                     ch0, ch1: var openArray[float32]): int		1557
+nim	processIntensityShort	audio/codecs/mpa.html#processIntensityShort,FrameHeader,array[,GranuleChannel],bool,bool,int,openArray[float32],openArray[float32]	proc processIntensityShort(header: FrameHeader; granule: array[2, GranuleChannel];\n                      mixed, midSide: bool; maxBound: int;\n                      ch0, ch1: var openArray[float32]): int		1579
+nim	stereoDecode	audio/codecs/mpa.html#stereoDecode,FrameHeader,array[,GranuleChannel],array[,array[,float32]]	proc stereoDecode(header: FrameHeader; granule: var array[2, GranuleChannel];\n             ch: var array[2, array[576, float32]])		1655
+nim	reorderSamples	audio/codecs/mpa.html#reorderSamples,FrameHeader,GranuleChannel,openArray[float32]	proc reorderSamples(header: FrameHeader; ch: var GranuleChannel;\n               buf: var openArray[float32])		1682
+nim	antialiasSamples	audio/codecs/mpa.html#antialiasSamples,GranuleChannel,openArray[float32]	proc antialiasSamples(ch: var GranuleChannel; samples: var openArray[float32])		1719
+nim	sdct9	audio/codecs/mpa.html#sdct9,openArray[float32],openArray[float32]	proc sdct9(x: openArray[float32]; y: var openArray[float32])		1738
+nim	sdct18	audio/codecs/mpa.html#sdct18,openArray[float32],openArray[float32]	proc sdct18(x: openArray[float32]; y: var openArray[float32])		1783
+nim	dctIv18	audio/codecs/mpa.html#dctIv18,openArray[float32],openArray[float32]	proc dctIv18(x: openArray[float32]; y: var openArray[float32])		1807
+nim	imdct36	audio/codecs/mpa.html#imdct36,openArray[float32],openArray[float32],openArray[float32]	proc imdct36(x: var openArray[float32]; window: openArray[float32];\n        overlap: var openArray[float32])		1817
+nim	imdct12win	audio/codecs/mpa.html#imdct12win,openArray[float32],openArray[float32],openArray[float32]	proc imdct12win(x: var openArray[float32]; window: openArray[float32];\n           overlap: var openArray[float32])		1833
+nim	hybridSynthesis	audio/codecs/mpa.html#hybridSynthesis,GranuleChannel,array[,array[,float32]],openArray[float32]	proc hybridSynthesis(ch: GranuleChannel; overlap: var array[32, array[18, float32]];\n                samples: var openArray[float32])		1851
+nim	frequencyInversion	audio/codecs/mpa.html#frequencyInversion,openArray[float32]	proc frequencyInversion(samples: var openArray[float32])		1892
+nim	reservoirFill	audio/codecs/mpa.html#reservoirFill,MpaReservoir,openArray[uint8],int	proc reservoirFill(rsv: var MpaReservoir; mainData: openArray[uint8];\n              mainDataBegin: int): int		1907
+nim	reservoirBytes	audio/codecs/mpa.html#reservoirBytes,MpaReservoir	proc reservoirBytes(rsv: MpaReservoir): seq[uint8]		1931
+nim	reservoirConsume	audio/codecs/mpa.html#reservoirConsume,MpaReservoir,int	proc reservoirConsume(rsv: var MpaReservoir; n: int)		1936
+nim	reservoirClear	audio/codecs/mpa.html#reservoirClear,MpaReservoir	proc reservoirClear(rsv: var MpaReservoir)		1939
+nim	readMainData	audio/codecs/mpa.html#readMainData,Layer3State,FrameHeader,int,FrameData	proc readMainData(state: var Layer3State; header: FrameHeader; underflowBytes: int;\n             frame: var FrameData): int		1943
+nim	decodeLayer3Frame	audio/codecs/mpa.html#decodeLayer3Frame,FrameHeader,openArray[uint8],Layer3State,AudioSamples	proc decodeLayer3Frame(header: FrameHeader; body: openArray[uint8];\n                  state: var Layer3State; buf: var AudioSamples)		1990
+nim	MpaLayerState	audio/codecs/mpa.html#MpaLayerState	object MpaLayerState		2047
+nim	MpaDecoder	audio/codecs/mpa.html#MpaDecoder	type MpaDecoder		2052
+nim	newMpaDecoder	audio/codecs/mpa.html#newMpaDecoder,AudioCodecParameters	proc newMpaDecoder(params: AudioCodecParameters; opts = defaultDecoderOptions()): MpaDecoder		2065
+nim	codecParams	audio/codecs/mpa.html#codecParams.e,MpaDecoder	method codecParams(d: MpaDecoder): AudioCodecParameters		2108
+nim	reset	audio/codecs/mpa.html#reset.e,MpaDecoder	method reset(d: MpaDecoder)		2110
+nim	decodePacket	audio/codecs/mpa.html#decodePacket.e,MpaDecoder,Packet	method decodePacket(d: MpaDecoder; pkt: Packet): AudioSamples		2113
+nim	lastDecoded	audio/codecs/mpa.html#lastDecoded.e,MpaDecoder	method lastDecoded(d: MpaDecoder): AudioSamples		2132
+nim	mpaDecoderFactory	audio/codecs/mpa.html#mpaDecoderFactory,AudioCodecParameters,AudioDecoderOptions	proc mpaDecoderFactory(params: AudioCodecParameters; opts: AudioDecoderOptions): AudioDecoder		2134
+nim	registerMpa	audio/codecs/mpa.html#registerMpa	proc registerMpa()		2138

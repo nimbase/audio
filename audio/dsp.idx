@@ -1,0 +1,14 @@
+nimTitle	dsp	audio/dsp.html	module audio/dsp		0
+nim	Complex32	audio/dsp.html#Complex32	object Complex32		10
+nim	`+`	audio/dsp.html#+,Complex32,Complex32	proc `+`(a, b: Complex32): Complex32		13
+nim	`-`	audio/dsp.html#-,Complex32,Complex32	proc `-`(a, b: Complex32): Complex32		16
+nim	`*`	audio/dsp.html#*,Complex32,Complex32	proc `*`(a, b: Complex32): Complex32		19
+nim	conj	audio/dsp.html#conj,Complex32	proc conj(a: Complex32): Complex32		22
+nim	FftMaxSize	audio/dsp.html#FftMaxSize	const FftMaxSize		25
+nim	Fft	audio/dsp.html#Fft	object Fft		69
+nim	newFft	audio/dsp.html#newFft,int	proc newFft(n: int): Fft		72
+nim	size	audio/dsp.html#size,Fft	proc size(f: Fft): int		76
+nim	fftInplace	audio/dsp.html#fftInplace,Fft,openArray[Complex32]	proc fftInplace(f: var Fft; x: var openArray[Complex32])		224
+nim	Imdct	audio/dsp.html#Imdct	object Imdct		248
+nim	newImdct	audio/dsp.html#newImdct,int,float	proc newImdct(n: int; scale = 1.0): Imdct		253
+nim	imdct	audio/dsp.html#imdct,Imdct,openArray[float32],openArray[float32]	proc imdct(m: var Imdct; spec: openArray[float32]; output: var openArray[float32])		268

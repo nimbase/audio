@@ -1,0 +1,56 @@
+nimTitle	vorbis	audio/codecs/vorbis.html	module audio/codecs/vorbis		0
+nim	countLeadingZeroBits	audio/codecs/vorbis.html#countLeadingZeroBits,uint32	proc countLeadingZeroBits(x: uint32): int		24
+nim	ilog	audio/codecs/vorbis.html#ilog,uint32	proc ilog(x: uint32): uint32		34
+nim	float32Unpack	audio/codecs/vorbis.html#float32Unpack,uint32	proc float32Unpack(x: uint32): float32		53
+nim	lookup1Values	audio/codecs/vorbis.html#lookup1Values,uint32,int	proc lookup1Values(entries: uint32; dimensions: int): uint32		60
+nim	synthesizeCodewords	audio/codecs/vorbis.html#synthesizeCodewords,openArray[uint8]	proc synthesizeCodewords(codeLens: openArray[uint8]): seq[uint32]		97
+nim	VorbisCodebook	audio/codecs/vorbis.html#VorbisCodebook	object VorbisCodebook		138
+nim	readCodebook	audio/codecs/vorbis.html#readCodebook,RtlBitReader	proc readCodebook(bs: var RtlBitReader): VorbisCodebook		148
+nim	readScalar	audio/codecs/vorbis.html#readScalar,VorbisCodebook,RtlBitReader	proc readScalar(cb: VorbisCodebook; bs: var RtlBitReader): uint32		232
+nim	readVq	audio/codecs/vorbis.html#readVq,VorbisCodebook,RtlBitReader	proc readVq(cb: VorbisCodebook; bs: var RtlBitReader): seq[float32]		235
+nim	Floor0Setup	audio/codecs/vorbis.html#Floor0Setup	object Floor0Setup		315
+nim	Floor1Class	audio/codecs/vorbis.html#Floor1Class	object Floor1Class		326
+nim	Floor1Setup	audio/codecs/vorbis.html#Floor1Setup	object Floor1Setup		333
+nim	fk0	audio/codecs/vorbis.html#fk0	FloorKind.fk0		342
+nim	fk1	audio/codecs/vorbis.html#fk1	FloorKind.fk1		342
+nim	FloorKind	audio/codecs/vorbis.html#FloorKind	enum FloorKind		342
+nim	FloorObj	audio/codecs/vorbis.html#FloorObj	type FloorObj		346
+nim	readFloor	audio/codecs/vorbis.html#readFloor,RtlBitReader,int,int,int	proc readFloor(bs: var RtlBitReader; bs0exp, bs1exp: int; maxCodebook: int): FloorObj		462
+nim	floorReadChannel	audio/codecs/vorbis.html#floorReadChannel,FloorObj,RtlBitReader,openArray[VorbisCodebook]	proc floorReadChannel(f: FloorObj; bs: var RtlBitReader;\n                 codebooks: openArray[VorbisCodebook])		679
+nim	floorIsUnused	audio/codecs/vorbis.html#floorIsUnused,FloorObj	proc floorIsUnused(f: FloorObj): bool		685
+nim	floorSynthesis	audio/codecs/vorbis.html#floorSynthesis,FloorObj,int,openArray[float32]	proc floorSynthesis(f: FloorObj; bsExp: int; floor: var openArray[float32])		690
+nim	ResidueClass	audio/codecs/vorbis.html#ResidueClass	object ResidueClass		701
+nim	ResidueSetup	audio/codecs/vorbis.html#ResidueSetup	object ResidueSetup		705
+nim	Residue	audio/codecs/vorbis.html#Residue	object Residue		715
+nim	isUsed	audio/codecs/vorbis.html#isUsed,ResidueClass,int	proc isUsed(c: ResidueClass; pass: int): bool		720
+nim	readResidueSetup	audio/codecs/vorbis.html#readResidueSetup,RtlBitReader,int,int	proc readResidueSetup(bs: var RtlBitReader; rtype: int; maxCodebook: int): ResidueSetup		723
+nim	readResidue	audio/codecs/vorbis.html#readResidue,RtlBitReader,int,int	proc readResidue(bs: var RtlBitReader; rtype: int; maxCodebook: int): Residue		752
+nim	generateWinCurve	audio/codecs/vorbis.html#generateWinCurve,int	proc generateWinCurve(bs: int): seq[float32]		793
+nim	Windows	audio/codecs/vorbis.html#Windows	object Windows		803
+nim	DspChannel	audio/codecs/vorbis.html#DspChannel	object DspChannel		807
+nim	Dsp	audio/codecs/vorbis.html#Dsp	object Dsp		816
+nim	newDspChannel	audio/codecs/vorbis.html#newDspChannel,int,int	proc newDspChannel(bs0exp, bs1exp: int): DspChannel		823
+nim	synthChannel	audio/codecs/vorbis.html#synthChannel,DspChannel,bool,bool,Windows,Imdct,openArray[float32]	proc synthChannel(ch: var DspChannel; blockFlag, prevBlockFlag: bool;\n             windows: Windows; imdct: var Imdct; buf: var openArray[float32])		839
+nim	resetDsp	audio/codecs/vorbis.html#resetDsp,Dsp	proc resetDsp(d: var Dsp)		868
+nim	readResidueData	audio/codecs/vorbis.html#readResidueData,Residue,RtlBitReader,int,openArray[VorbisCodebook],openArray[int],openArray[DspChannel]	proc readResidueData(res: var Residue; bs: var RtlBitReader; bsExp: int;\n                codebooks: openArray[VorbisCodebook]; chIdx: openArray[int];\n                channels: var openArray[DspChannel])		1004
+nim	ChannelCouple	audio/codecs/vorbis.html#ChannelCouple	object ChannelCouple		1022
+nim	SubMap	audio/codecs/vorbis.html#SubMap	object SubMap		1026
+nim	Mapping	audio/codecs/vorbis.html#Mapping	object Mapping		1030
+nim	Mode	audio/codecs/vorbis.html#Mode	object Mode		1035
+nim	mapVorbisChannel	audio/codecs/vorbis.html#mapVorbisChannel,int,int	proc mapVorbisChannel(numChannels, ch: int): int		1096
+nim	IdentHeader	audio/codecs/vorbis.html#IdentHeader	object IdentHeader		1121
+nim	VorbisSetup	audio/codecs/vorbis.html#VorbisSetup	object VorbisSetup		1127
+nim	vorbisChannelsToChannels	audio/codecs/vorbis.html#vorbisChannelsToChannels,int	proc vorbisChannelsToChannels(n: int): Channels		1134
+nim	readIdentHeader	audio/codecs/vorbis.html#readIdentHeader,Reader	proc readIdentHeader(r: var Reader): IdentHeader		1149
+nim	readSetup	audio/codecs/vorbis.html#readSetup,openArray[uint8],IdentHeader	proc readSetup(data: openArray[uint8]; ident: IdentHeader): VorbisSetup		1180
+nim	unpackXiphLaced	audio/codecs/vorbis.html#unpackXiphLaced,openArray[uint8]	proc unpackXiphLaced(extra: openArray[uint8]): tuple[ident, setup: seq[uint8]]		1214
+nim	readExtradata	audio/codecs/vorbis.html#readExtradata,openArray[uint8]	proc readExtradata(extra: openArray[uint8]): tuple[ident: IdentHeader,\n    setup: VorbisSetup]		1241
+nim	skipVorbisSetupModes	audio/codecs/vorbis.html#skipVorbisSetupModes,openArray[uint8],int	proc skipVorbisSetupModes(setupPacket: openArray[uint8]; audioChannels: int): tuple[\n    numModes: int, blockFlags: uint64]		1357
+nim	VorbisDecoder	audio/codecs/vorbis.html#VorbisDecoder	type VorbisDecoder		1398
+nim	newVorbisDecoder	audio/codecs/vorbis.html#newVorbisDecoder,AudioCodecParameters	proc newVorbisDecoder(params: AudioCodecParameters; opts = defaultDecoderOptions()): VorbisDecoder		1410
+nim	codecParams	audio/codecs/vorbis.html#codecParams.e,VorbisDecoder	method codecParams(d: VorbisDecoder): AudioCodecParameters		1533
+nim	reset	audio/codecs/vorbis.html#reset.e,VorbisDecoder	method reset(d: VorbisDecoder)		1535
+nim	decodePacket	audio/codecs/vorbis.html#decodePacket.e,VorbisDecoder,Packet	method decodePacket(d: VorbisDecoder; pkt: Packet): AudioSamples		1538
+nim	lastDecoded	audio/codecs/vorbis.html#lastDecoded.e,VorbisDecoder	method lastDecoded(d: VorbisDecoder): AudioSamples		1558
+nim	vorbisDecoderFactory	audio/codecs/vorbis.html#vorbisDecoderFactory,AudioCodecParameters,AudioDecoderOptions	proc vorbisDecoderFactory(params: AudioCodecParameters; opts: AudioDecoderOptions): AudioDecoder		1560
+nim	registerVorbis	audio/codecs/vorbis.html#registerVorbis	proc registerVorbis()		1564

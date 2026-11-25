@@ -1,0 +1,106 @@
+nimTitle	io	audio/io.html	module audio/io		0
+nim	Reader	audio/io.html#Reader	object Reader		14
+nim	Writer	audio/io.html#Writer	object Writer		19
+nim	newReader	audio/io.html#newReader,seq[uint8]	proc newReader(data: seq[uint8]): Reader		25
+nim	newReader	audio/io.html#newReader,openArray[uint8]	proc newReader(data: openArray[uint8]): Reader		28
+nim	len	audio/io.html#len,Reader	proc len(r: Reader): int		31
+nim	remaining	audio/io.html#remaining,Reader	proc remaining(r: Reader): int		32
+nim	isEmpty	audio/io.html#isEmpty,Reader	proc isEmpty(r: Reader): bool		33
+nim	readByte	audio/io.html#readByte,Reader	proc readByte(r: var Reader): uint8		39
+nim	readBytes	audio/io.html#readBytes,Reader,int	proc readBytes(r: var Reader; n: int): seq[uint8]		44
+nim	readBytesExact	audio/io.html#readBytesExact,Reader,int	proc readBytesExact(r: var Reader; n: int): seq[uint8]		50
+nim	ignoreBytes	audio/io.html#ignoreBytes,Reader,int	proc ignoreBytes(r: var Reader; n: int)		55
+nim	readU16Le	audio/io.html#readU16Le,Reader	proc readU16Le(r: var Reader): uint16		59
+nim	readU16Be	audio/io.html#readU16Be,Reader	proc readU16Be(r: var Reader): uint16		64
+nim	readI16Le	audio/io.html#readI16Le,Reader	proc readI16Le(r: var Reader): int16		69
+nim	readI16Be	audio/io.html#readI16Be,Reader	proc readI16Be(r: var Reader): int16		70
+nim	readU24Le	audio/io.html#readU24Le,Reader	proc readU24Le(r: var Reader): uint32		72
+nim	readU24Be	audio/io.html#readU24Be,Reader	proc readU24Be(r: var Reader): uint32		81
+nim	readI24Le	audio/io.html#readI24Le,Reader	proc readI24Le(r: var Reader): int32		89
+nim	readI24Be	audio/io.html#readI24Be,Reader	proc readI24Be(r: var Reader): int32		94
+nim	readU32Le	audio/io.html#readU32Le,Reader	proc readU32Le(r: var Reader): uint32		98
+nim	readU32Be	audio/io.html#readU32Be,Reader	proc readU32Be(r: var Reader): uint32		107
+nim	readI32Le	audio/io.html#readI32Le,Reader	proc readI32Le(r: var Reader): int32		116
+nim	readI32Be	audio/io.html#readI32Be,Reader	proc readI32Be(r: var Reader): int32		117
+nim	readU64Le	audio/io.html#readU64Le,Reader	proc readU64Le(r: var Reader): uint64		119
+nim	readU64Be	audio/io.html#readU64Be,Reader	proc readU64Be(r: var Reader): uint64		126
+nim	readI64Le	audio/io.html#readI64Le,Reader	proc readI64Le(r: var Reader): int64		133
+nim	readI64Be	audio/io.html#readI64Be,Reader	proc readI64Be(r: var Reader): int64		134
+nim	readF32Le	audio/io.html#readF32Le,Reader	proc readF32Le(r: var Reader): float32		136
+nim	readF32Be	audio/io.html#readF32Be,Reader	proc readF32Be(r: var Reader): float32		137
+nim	readF64Le	audio/io.html#readF64Le,Reader	proc readF64Le(r: var Reader): float64		139
+nim	readF64Be	audio/io.html#readF64Be,Reader	proc readF64Be(r: var Reader): float64		147
+nim	readFourCc	audio/io.html#readFourCc,Reader	proc readFourCc(r: var Reader): array[4, uint8]		155
+nim	fourCc	audio/io.html#fourCc,char,char,char,char	proc fourCc(a, b, c, d: char): array[4, uint8]		161
+nim	fourCcToStr	audio/io.html#fourCcToStr,array[,uint8]	proc fourCcToStr(tag: array[4, uint8]): string		164
+nim	newWriter	audio/io.html#newWriter	proc newWriter(): Writer		171
+nim	len	audio/io.html#len,Writer	proc len(w: Writer): int		173
+nim	toBytes	audio/io.html#toBytes,Writer	proc toBytes(w: Writer): seq[uint8]		174
+nim	writeByte	audio/io.html#writeByte,Writer,uint8	proc writeByte(w: var Writer; v: uint8)		176
+nim	writeBytes	audio/io.html#writeBytes,Writer,openArray[uint8]	proc writeBytes(w: var Writer; data: openArray[uint8])		178
+nim	writeU16Le	audio/io.html#writeU16Le,Writer,uint16	proc writeU16Le(w: var Writer; v: uint16)		182
+nim	writeU16Be	audio/io.html#writeU16Be,Writer,uint16	proc writeU16Be(w: var Writer; v: uint16)		186
+nim	writeI16Le	audio/io.html#writeI16Le,Writer,int16	proc writeI16Le(w: var Writer; v: int16)		190
+nim	writeI16Be	audio/io.html#writeI16Be,Writer,int16	proc writeI16Be(w: var Writer; v: int16)		191
+nim	writeU24Le	audio/io.html#writeU24Le,Writer,uint32	proc writeU24Le(w: var Writer; v: uint32)		193
+nim	writeU24Be	audio/io.html#writeU24Be,Writer,uint32	proc writeU24Be(w: var Writer; v: uint32)		199
+nim	writeU32Le	audio/io.html#writeU32Le,Writer,uint32	proc writeU32Le(w: var Writer; v: uint32)		204
+nim	writeU32Be	audio/io.html#writeU32Be,Writer,uint32	proc writeU32Be(w: var Writer; v: uint32)		208
+nim	writeI32Le	audio/io.html#writeI32Le,Writer,int32	proc writeI32Le(w: var Writer; v: int32)		212
+nim	writeI32Be	audio/io.html#writeI32Be,Writer,int32	proc writeI32Be(w: var Writer; v: int32)		213
+nim	writeF32Le	audio/io.html#writeF32Le,Writer,float32	proc writeF32Le(w: var Writer; v: float32)		215
+nim	writeF32Be	audio/io.html#writeF32Be,Writer,float32	proc writeF32Be(w: var Writer; v: float32)		218
+nim	writeF64Le	audio/io.html#writeF64Le,Writer,float64	proc writeF64Le(w: var Writer; v: float64)		221
+nim	writeF64Be	audio/io.html#writeF64Be,Writer,float64	proc writeF64Be(w: var Writer; v: float64)		226
+nim	patchU32Le	audio/io.html#patchU32Le,Writer,int,uint32	proc patchU32Le(w: var Writer; at: int; v: uint32)		231
+nim	writeFourCc	audio/io.html#writeFourCc,Writer,array[,uint8]	proc writeFourCc(w: var Writer; tag: array[4, uint8])		238
+nim	toBytes	audio/io.html#toBytes,string	proc toBytes(s: string): seq[uint8]		241
+nim	BitReader	audio/io.html#BitReader	object BitReader		250
+nim	newBitReader	audio/io.html#newBitReader,openArray[uint8]	proc newBitReader(data: openArray[uint8]): BitReader		256
+nim	bitsLeft	audio/io.html#bitsLeft,BitReader	proc bitsLeft(b: BitReader): int		259
+nim	readBit	audio/io.html#readBit,BitReader	proc readBit(b: var BitReader): bool		262
+nim	readBits	audio/io.html#readBits,BitReader,int	proc readBits(b: var BitReader; n: int): uint32		271
+nim	readBits64	audio/io.html#readBits64,BitReader,int	proc readBits64(b: var BitReader; n: int): uint64		292
+nim	readSigned	audio/io.html#readSigned,BitReader,int	proc readSigned(b: var BitReader; n: int): int32		303
+nim	signExtend	audio/io.html#signExtend,uint32,int	proc signExtend(v: uint32; n: int): int32		313
+nim	readUnaryZeros	audio/io.html#readUnaryZeros,BitReader	proc readUnaryZeros(b: var BitReader): uint32		322
+nim	ignoreBits	audio/io.html#ignoreBits,BitReader,int	proc ignoreBits(b: var BitReader; n: int)		327
+nim	veJump	audio/io.html#veJump	VlcEntryKind.veJump		335
+nim	veValue	audio/io.html#veValue	VlcEntryKind.veValue		335
+nim	VlcEntryKind	audio/io.html#VlcEntryKind	enum VlcEntryKind		335
+nim	VlcEntry	audio/io.html#VlcEntry	object VlcEntry		339
+nim	VlcTable	audio/io.html#VlcTable	object VlcTable		347
+nim	LtrBitReader	audio/io.html#LtrBitReader	object LtrBitReader		359
+nim	newLtrBitReader	audio/io.html#newLtrBitReader,openArray[uint8]	proc newLtrBitReader(data: openArray[uint8]): LtrBitReader		367
+nim	bitsLeft	audio/io.html#bitsLeft,LtrBitReader	proc bitsLeft(b: LtrBitReader): int		370
+nim	readLtrBits	audio/io.html#readLtrBits,LtrBitReader,int	proc readLtrBits(b: var LtrBitReader; n: int): uint32		391
+nim	readLtrBool	audio/io.html#readLtrBool,LtrBitReader	proc readLtrBool(b: var LtrBitReader): bool		408
+nim	readLtrBit	audio/io.html#readLtrBit,LtrBitReader	proc readLtrBit(b: var LtrBitReader): uint32		411
+nim	readLtrSigned	audio/io.html#readLtrSigned,LtrBitReader,int	proc readLtrSigned(b: var LtrBitReader; n: int): int32		414
+nim	ignoreLtrBits	audio/io.html#ignoreLtrBits,LtrBitReader,int	proc ignoreLtrBits(b: var LtrBitReader; n: int)		417
+nim	readLtrVlc	audio/io.html#readLtrVlc,LtrBitReader,VlcTable	proc readLtrVlc(b: var LtrBitReader; t: VlcTable): tuple[value: uint32, codeLen: int]		427
+nim	readLtrUnaryOnes	audio/io.html#readLtrUnaryOnes,LtrBitReader	proc readLtrUnaryOnes(b: var LtrBitReader): int		448
+nim	realignLtr	audio/io.html#realignLtr,LtrBitReader	proc realignLtr(b: var LtrBitReader)		453
+nim	BitWriter	audio/io.html#BitWriter	object BitWriter		462
+nim	newBitWriter	audio/io.html#newBitWriter	proc newBitWriter(): BitWriter		468
+nim	writeBit	audio/io.html#writeBit,BitWriter,bool	proc writeBit(w: var BitWriter; bit: bool)		470
+nim	writeBits	audio/io.html#writeBits,BitWriter,uint32,int	proc writeBits(w: var BitWriter; v: uint32; n: int)		478
+nim	writeSigned	audio/io.html#writeSigned,BitWriter,int32,int	proc writeSigned(w: var BitWriter; v: int32; n: int)		484
+nim	writeUnary	audio/io.html#writeUnary,BitWriter,uint32	proc writeUnary(w: var BitWriter; q: uint32)		488
+nim	flush	audio/io.html#flush,BitWriter	proc flush(w: var BitWriter)		494
+nim	toBytes	audio/io.html#toBytes,BitWriter	proc toBytes(w: BitWriter): seq[uint8]		499
+nim	len	audio/io.html#len,BitWriter	proc len(w: BitWriter): int		504
+nim	RtlBitReader	audio/io.html#RtlBitReader	object RtlBitReader		510
+nim	newRtlBitReader	audio/io.html#newRtlBitReader,openArray[uint8]	proc newRtlBitReader(data: openArray[uint8]): RtlBitReader		517
+nim	bitsLeft	audio/io.html#bitsLeft,RtlBitReader	proc bitsLeft(b: RtlBitReader): int		520
+nim	readRtlBits	audio/io.html#readRtlBits,RtlBitReader,int	proc readRtlBits(b: var RtlBitReader; n: int): uint32		538
+nim	readRtlBits64	audio/io.html#readRtlBits64,RtlBitReader,int	proc readRtlBits64(b: var RtlBitReader; n: int): uint64		557
+nim	readRtlBool	audio/io.html#readRtlBool,RtlBitReader	proc readRtlBool(b: var RtlBitReader): bool		578
+nim	readRtlSigned	audio/io.html#readRtlSigned,RtlBitReader,int	proc readRtlSigned(b: var RtlBitReader; n: int): int32		581
+nim	ignoreRtlBits	audio/io.html#ignoreRtlBits,RtlBitReader,int	proc ignoreRtlBits(b: var RtlBitReader; n: int)		584
+nim	buildVlcTable	audio/io.html#buildVlcTable,openArray[uint32],openArray[uint32],openArray[uint32],int,bool	proc buildVlcTable(codes, lens: openArray[uint32]; values: openArray[uint32];\n              bitsPerBlock: int; reverse: bool): VlcTable		605
+nim	readVlc	audio/io.html#readVlc,RtlBitReader,VlcTable	proc readVlc(b: var RtlBitReader; t: VlcTable): tuple[value: uint32, codeLen: int]		695
+nimgrp	bitsleft	audio/io.html#bitsLeft-procs-all	proc		259
+nimgrp	tobytes	audio/io.html#toBytes-procs-all	proc		174
+nimgrp	newreader	audio/io.html#newReader-procs-all	proc		25
+nimgrp	len	audio/io.html#len-procs-all	proc		31

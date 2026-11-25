@@ -1,0 +1,4 @@
+nimTitle	packet	audio/packet.html	module audio/packet		0
+nim	Packet	audio/packet.html#Packet	object Packet		10
+nim	newPacket	audio/packet.html#newPacket,uint32,Timestamp,Duration,seq[uint8]	proc newPacket(trackId: uint32; pts: Timestamp; dur: Duration; data: seq[uint8]): Packet		19
+nim	blockDur	audio/packet.html#blockDur,Packet	proc blockDur(p: Packet): Duration		24

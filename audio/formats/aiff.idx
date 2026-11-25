@@ -1,0 +1,11 @@
+nimTitle	aiff	audio/formats/aiff.html	module audio/formats/aiff		0
+nim	AiffFormatInfo	audio/formats/aiff.html#AiffFormatInfo	const AiffFormatInfo		24
+nim	AiffReader	audio/formats/aiff.html#AiffReader	type AiffReader		28
+nim	probeAiff	audio/formats/aiff.html#probeAiff,openArray[uint8]	proc probeAiff(data: openArray[uint8]): int		36
+nim	AiffFmt	audio/formats/aiff.html#AiffFmt	object AiffFmt		123
+nim	openAiff	audio/formats/aiff.html#openAiff,seq[uint8]	proc openAiff(data: seq[uint8]): AiffReader		203
+nim	trackCount	audio/formats/aiff.html#trackCount,AiffReader	proc trackCount(w: AiffReader): int		316
+nim	mediaInfo	audio/formats/aiff.html#mediaInfo,AiffReader	proc mediaInfo(w: AiffReader): MediaInfo		318
+nim	numFrames	audio/formats/aiff.html#numFrames,AiffReader	proc numFrames(w: AiffReader): Option[uint64]		322
+nim	nextPacket	audio/formats/aiff.html#nextPacket,AiffReader	proc nextPacket(w: AiffReader): Option[Packet]		324
+nim	seek	audio/formats/aiff.html#seek,AiffReader,SeekTo	proc seek(w: AiffReader; to: SeekTo): SeekedTo		339

@@ -1,0 +1,11 @@
+nimTitle	checksum	audio/checksum.html	module audio/checksum		0
+nim	crc8	audio/checksum.html#crc8,openArray[uint8],uint8	proc crc8(data: openArray[uint8]; init = 0'u8): uint8		23
+nim	crc16Ansi	audio/checksum.html#crc16Ansi,openArray[uint8],uint16	proc crc16Ansi(data: openArray[uint8]; init = 0'u16): uint16		46
+nim	crc16AnsiLe	audio/checksum.html#crc16AnsiLe,openArray[uint8],uint16	proc crc16AnsiLe(data: openArray[uint8]; init = 0'u16): uint16		72
+nim	crc32Mpeg2	audio/checksum.html#crc32Mpeg2,openArray[uint8]	proc crc32Mpeg2(data: openArray[uint8]): uint32		110
+nim	crc32	audio/checksum.html#crc32,openArray[uint8]	proc crc32(data: openArray[uint8]): uint32		120
+nim	Md5	audio/checksum.html#Md5	object Md5		133
+nim	initMd5	audio/checksum.html#initMd5,Md5	proc initMd5(m: var Md5)		139
+nim	newMd5	audio/checksum.html#newMd5	proc newMd5(): Md5		144
+nim	update	audio/checksum.html#update,Md5,openArray[uint8]	proc update(m: var Md5; data: openArray[uint8])		246
+nim	digest	audio/checksum.html#digest,Md5	proc digest(m: Md5): array[16, uint8]		264

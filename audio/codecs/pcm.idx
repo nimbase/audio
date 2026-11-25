@@ -1,0 +1,18 @@
+nimTitle	pcm	audio/codecs/pcm.html	module audio/codecs/pcm		0
+nim	alawToLinear	audio/codecs/pcm.html#alawToLinear,uint8	proc alawToLinear(code: uint8): int16		32
+nim	mulawToLinear	audio/codecs/pcm.html#mulawToLinear,uint8	proc mulawToLinear(code: uint8): int16		42
+nim	linearToALaw	audio/codecs/pcm.html#linearToALaw,int16	proc linearToALaw(s: int16): uint8		96
+nim	linearToMuLaw	audio/codecs/pcm.html#linearToMuLaw,int16	proc linearToMuLaw(s: int16): uint8		102
+nim	isSupportedPcmCodec	audio/codecs/pcm.html#isSupportedPcmCodec,AudioCodecId	proc isSupportedPcmCodec(id: AudioCodecId): bool		108
+nim	isPlanarPcmCodec	audio/codecs/pcm.html#isPlanarPcmCodec,AudioCodecId	proc isPlanarPcmCodec(id: AudioCodecId): bool		117
+nim	sampleFormatOf	audio/codecs/pcm.html#sampleFormatOf,AudioCodecId	proc sampleFormatOf(id: AudioCodecId): SampleFormat		127
+nim	isBigEndian	audio/codecs/pcm.html#isBigEndian,AudioCodecId	proc isBigEndian(id: AudioCodecId): bool		152
+nim	PcmDecoder	audio/codecs/pcm.html#PcmDecoder	type PcmDecoder		159
+nim	newPcmDecoder	audio/codecs/pcm.html#newPcmDecoder,AudioCodecParameters	proc newPcmDecoder(params: AudioCodecParameters; opts = defaultDecoderOptions()): PcmDecoder		178
+nim	codecParams	audio/codecs/pcm.html#codecParams.e,PcmDecoder	method codecParams(d: PcmDecoder): AudioCodecParameters		292
+nim	reset	audio/codecs/pcm.html#reset.e,PcmDecoder	method reset(d: PcmDecoder)		294
+nim	decodePacket	audio/codecs/pcm.html#decodePacket.e,PcmDecoder,Packet	method decodePacket(d: PcmDecoder; pkt: Packet): AudioSamples		298
+nim	lastDecoded	audio/codecs/pcm.html#lastDecoded.e,PcmDecoder	method lastDecoded(d: PcmDecoder): AudioSamples		306
+nim	pcmDecoderFactory	audio/codecs/pcm.html#pcmDecoderFactory,AudioCodecParameters,AudioDecoderOptions	proc pcmDecoderFactory(params: AudioCodecParameters; opts: AudioDecoderOptions): AudioDecoder		308
+nim	registerPcm	audio/codecs/pcm.html#registerPcm	proc registerPcm()		312
+nim	encodePcm	audio/codecs/pcm.html#encodePcm,AudioSamples,AudioCodecId	proc encodePcm(buf: AudioSamples; codec: AudioCodecId): seq[uint8]		325

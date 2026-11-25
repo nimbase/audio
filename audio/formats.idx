@@ -1,0 +1,27 @@
+nimTitle	formats	audio/formats.html	module audio/formats		0
+nim	FormatId	audio/formats.html#FormatId	type FormatId		12
+nim	`==`	audio/formats.html#==,FormatId,FormatId	proc `==`(a, b: FormatId): bool		14
+nim	hash	audio/formats.html#hash,FormatId	proc hash(id: FormatId): Hash		15
+nim	FormatNull	audio/formats.html#FormatNull	const FormatNull		18
+nim	FormatWave	audio/formats.html#FormatWave	const FormatWave		19
+nim	FormatAiff	audio/formats.html#FormatAiff	const FormatAiff		20
+nim	FormatCaf	audio/formats.html#FormatCaf	const FormatCaf		21
+nim	FormatOgg	audio/formats.html#FormatOgg	const FormatOgg		22
+nim	FormatFlac	audio/formats.html#FormatFlac	const FormatFlac		23
+nim	FormatWavPack	audio/formats.html#FormatWavPack	const FormatWavPack		24
+nim	FormatIsoMp4	audio/formats.html#FormatIsoMp4	const FormatIsoMp4		25
+nim	FormatMkv	audio/formats.html#FormatMkv	const FormatMkv		26
+nim	FormatMp3	audio/formats.html#FormatMp3	const FormatMp3		27
+nim	smCoarse	audio/formats.html#smCoarse	SeekMode.smCoarse		30
+nim	smAccurate	audio/formats.html#smAccurate	SeekMode.smAccurate		30
+nim	SeekMode	audio/formats.html#SeekMode	enum SeekMode		30
+nim	SeekTo	audio/formats.html#SeekTo	object SeekTo		34
+nim	SeekedTo	audio/formats.html#SeekedTo	object SeekedTo		43
+nim	Track	audio/formats.html#Track	object Track		48
+nim	MediaInfo	audio/formats.html#MediaInfo	object MediaInfo		56
+nim	FormatInfo	audio/formats.html#FormatInfo	object FormatInfo		61
+nim	FormatOptions	audio/formats.html#FormatOptions	object FormatOptions		66
+nim	defaultFormatOptions	audio/formats.html#defaultFormatOptions	proc defaultFormatOptions(): FormatOptions		70
+nim	newTrack	audio/formats.html#newTrack,uint32,AudioCodecParameters	proc newTrack(id: uint32; codec: AudioCodecParameters): Track		73
+nim	seekToTimestamp	audio/formats.html#seekToTimestamp,Timestamp,uint32	proc seekToTimestamp(ts: Timestamp; trackId: uint32): SeekTo		83
+nim	seekToTime	audio/formats.html#seekToTime,Time	proc seekToTime(t: Time; trackId = none(uint32)): SeekTo		86

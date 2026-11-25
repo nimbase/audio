@@ -1,0 +1,24 @@
+nimTitle	flac	audio/formats/flac.html	module audio/formats/flac		0
+nim	FlacFormatInfo	audio/formats/flac.html#FlacFormatInfo	const FlacFormatInfo		28
+nim	FlacExtensions	audio/formats/flac.html#FlacExtensions	const FlacExtensions		31
+nim	FlacMimeTypes	audio/formats/flac.html#FlacMimeTypes	const FlacMimeTypes		32
+nim	mbtStreamInfo	audio/formats/flac.html#mbtStreamInfo	MetadataBlockType.mbtStreamInfo		35
+nim	mbtPadding	audio/formats/flac.html#mbtPadding	MetadataBlockType.mbtPadding		35
+nim	mbtApplication	audio/formats/flac.html#mbtApplication	MetadataBlockType.mbtApplication		35
+nim	mbtSeekTable	audio/formats/flac.html#mbtSeekTable	MetadataBlockType.mbtSeekTable		35
+nim	mbtVorbisComment	audio/formats/flac.html#mbtVorbisComment	MetadataBlockType.mbtVorbisComment		35
+nim	mbtCuesheet	audio/formats/flac.html#mbtCuesheet	MetadataBlockType.mbtCuesheet		35
+nim	mbtPicture	audio/formats/flac.html#mbtPicture	MetadataBlockType.mbtPicture		35
+nim	MetadataBlockType	audio/formats/flac.html#MetadataBlockType	enum MetadataBlockType		35
+nim	FlacFrameIndex	audio/formats/flac.html#FlacFrameIndex	object FlacFrameIndex		44
+nim	FlacReader	audio/formats/flac.html#FlacReader	type FlacReader		49
+nim	probeFlac	audio/formats/flac.html#probeFlac,openArray[uint8]	proc probeFlac(data: openArray[uint8]): int		65
+nim	parseVorbisComment	audio/formats/flac.html#parseVorbisComment,Reader,int	proc parseVorbisComment(r: var Reader; bodyLen: int): MetadataRevision		78
+nim	openFlac	audio/formats/flac.html#openFlac,seq[uint8]	proc openFlac(data: seq[uint8]): FlacReader		266
+nim	trackCount	audio/formats/flac.html#trackCount,FlacReader	proc trackCount(w: FlacReader): int		333
+nim	mediaInfo	audio/formats/flac.html#mediaInfo,FlacReader	proc mediaInfo(w: FlacReader): MediaInfo		335
+nim	numFrames	audio/formats/flac.html#numFrames,FlacReader	proc numFrames(w: FlacReader): Option[uint64]		339
+nim	nextPacket	audio/formats/flac.html#nextPacket,FlacReader	proc nextPacket(w: FlacReader): Option[Packet]		341
+nim	seek	audio/formats/flac.html#seek,FlacReader,SeekTo	proc seek(w: FlacReader; to: SeekTo): SeekedTo		357
+nim	toRawPlanes	audio/formats/flac.html#toRawPlanes,AudioSamples,uint32	proc toRawPlanes(samples: AudioSamples; bps: uint32): seq[seq[int32]]		395
+nim	encodeFlacStream	audio/formats/flac.html#encodeFlacStream,AudioSamples,uint32,uint32	proc encodeFlacStream(samples: AudioSamples; sampleRate: uint32;\n                 bitsPerSample = 0'u32): seq[uint8]		427

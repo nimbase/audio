@@ -1,0 +1,21 @@
+nimTitle	alac	audio/codecs/alac.html	module audio/codecs/alac		0
+nim	AlacCookie	audio/codecs/alac.html#AlacCookie	object AlacCookie		23
+nim	alacChannelsByCount	audio/codecs/alac.html#alacChannelsByCount,int	proc alacChannelsByCount(n: int): Channels		33
+nim	readAlacCookie	audio/codecs/alac.html#readAlacCookie,openArray[uint8]	proc readAlacCookie(data: openArray[uint8]): AlacCookie		54
+nim	alacChannelMap	audio/codecs/alac.html#alacChannelMap,Channels	proc alacChannelMap(channels: Channels): array[8, int]		128
+nim	AlacElementChannel	audio/codecs/alac.html#AlacElementChannel	object AlacElementChannel		152
+nim	readAlacElementChannel	audio/codecs/alac.html#readAlacElementChannel,LtrBitReader,AlacCookie,int	proc readAlacElementChannel(bs: var LtrBitReader; cookie: AlacCookie; bps: int): AlacElementChannel		162
+nim	lg3a	audio/codecs/alac.html#lg3a,uint32	proc lg3a(v: uint32): uint32		177
+nim	readRiceCode	audio/codecs/alac.html#readRiceCode,LtrBitReader,uint32,uint32	proc readRiceCode(bs: var LtrBitReader; k, bps: uint32): uint32		193
+nim	riceToSigned	audio/codecs/alac.html#riceToSigned,uint32	proc riceToSigned(v: uint32): int32		218
+nim	clipMsbs	audio/codecs/alac.html#clipMsbs,int32,int	proc clipMsbs(v: int32; n: int): int32		221
+nim	readResiduals	audio/codecs/alac.html#readResiduals,LtrBitReader,AlacElementChannel,openArray[int32]	proc readResiduals(bs: var LtrBitReader; e: var AlacElementChannel;\n              dst: var openArray[int32])		224
+nim	decodeSceOrCpe	audio/codecs/alac.html#decodeSceOrCpe,AlacCookie,LtrBitReader,openArray[uint16],openArray[int32],openArray[int32],bool	proc decodeSceOrCpe(cookie: AlacCookie; bs: var LtrBitReader;\n               tails: var openArray[uint16]; out0: var openArray[int32];\n               out1: var openArray[int32]; hasOut1: bool): int		305
+nim	AlacDecoder	audio/codecs/alac.html#AlacDecoder	type AlacDecoder		396
+nim	newAlacDecoder	audio/codecs/alac.html#newAlacDecoder,AudioCodecParameters	proc newAlacDecoder(params: AudioCodecParameters; opts = defaultDecoderOptions()): AlacDecoder		405
+nim	codecParams	audio/codecs/alac.html#codecParams.e,AlacDecoder	method codecParams(d: AlacDecoder): AudioCodecParameters		489
+nim	reset	audio/codecs/alac.html#reset.e,AlacDecoder	method reset(d: AlacDecoder)		491
+nim	decodePacket	audio/codecs/alac.html#decodePacket.e,AlacDecoder,Packet	method decodePacket(d: AlacDecoder; pkt: Packet): AudioSamples		494
+nim	lastDecoded	audio/codecs/alac.html#lastDecoded.e,AlacDecoder	method lastDecoded(d: AlacDecoder): AudioSamples		516
+nim	alacDecoderFactory	audio/codecs/alac.html#alacDecoderFactory,AudioCodecParameters,AudioDecoderOptions	proc alacDecoderFactory(params: AudioCodecParameters; opts: AudioDecoderOptions): AudioDecoder		518
+nim	registerAlac	audio/codecs/alac.html#registerAlac	proc registerAlac()		522

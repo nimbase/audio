@@ -1,0 +1,32 @@
+nimTitle	adpcm	audio/codecs/adpcm.html	module audio/codecs/adpcm		0
+nim	MsAdaptTable	audio/codecs/adpcm.html#MsAdaptTable	const MsAdaptTable		26
+nim	MsCoeffs1	audio/codecs/adpcm.html#MsCoeffs1	const MsCoeffs1		28
+nim	MsCoeffs2	audio/codecs/adpcm.html#MsCoeffs2	const MsCoeffs2		29
+nim	ImaIndexTable	audio/codecs/adpcm.html#ImaIndexTable	const ImaIndexTable		32
+nim	ImaStepTable	audio/codecs/adpcm.html#ImaStepTable	const ImaStepTable		34
+nim	akMs	audio/codecs/adpcm.html#akMs	AdpcmKind.akMs		45
+nim	akImaWav	audio/codecs/adpcm.html#akImaWav	AdpcmKind.akImaWav		45
+nim	akImaQt	audio/codecs/adpcm.html#akImaQt	AdpcmKind.akImaQt		45
+nim	AdpcmKind	audio/codecs/adpcm.html#AdpcmKind	enum AdpcmKind		45
+nim	AdpcmDecoder	audio/codecs/adpcm.html#AdpcmDecoder	type AdpcmDecoder		50
+nim	decodeMsMono	audio/codecs/adpcm.html#decodeMsMono,Reader,openArray[int32],int	proc decodeMsMono(r: var Reader; outp: var openArray[int32]; framesPerBlock: int)		114
+nim	decodeMsStereo	audio/codecs/adpcm.html#decodeMsStereo,Reader,openArray[int32],openArray[int32],int	proc decodeMsStereo(r: var Reader; left, right: var openArray[int32];\n               framesPerBlock: int)		126
+nim	decodeImaWavMono	audio/codecs/adpcm.html#decodeImaWavMono,Reader,openArray[int32],int	proc decodeImaWavMono(r: var Reader; outp: var openArray[int32]; framesPerBlock: int)		172
+nim	decodeImaWavStereo	audio/codecs/adpcm.html#decodeImaWavStereo,Reader,openArray[int32],openArray[int32],int	proc decodeImaWavStereo(r: var Reader; left, right: var openArray[int32];\n                   framesPerBlock: int)		187
+nim	decodeImaQtMono	audio/codecs/adpcm.html#decodeImaQtMono,Reader,openArray[int32]	proc decodeImaQtMono(r: var Reader; outp: var openArray[int32])		214
+nim	decodeImaQtStereo	audio/codecs/adpcm.html#decodeImaQtStereo,Reader,openArray[int32],openArray[int32]	proc decodeImaQtStereo(r: var Reader; left, right: var openArray[int32])		223
+nim	isSupportedAdpcmCodec	audio/codecs/adpcm.html#isSupportedAdpcmCodec,AudioCodecId	proc isSupportedAdpcmCodec(id: AudioCodecId): bool		229
+nim	newAdpcmDecoder	audio/codecs/adpcm.html#newAdpcmDecoder,AudioCodecParameters	proc newAdpcmDecoder(params: AudioCodecParameters; opts = defaultDecoderOptions()): AdpcmDecoder		232
+nim	codecParams	audio/codecs/adpcm.html#codecParams.e,AdpcmDecoder	method codecParams(d: AdpcmDecoder): AudioCodecParameters		328
+nim	reset	audio/codecs/adpcm.html#reset.e,AdpcmDecoder	method reset(d: AdpcmDecoder)		330
+nim	decodePacket	audio/codecs/adpcm.html#decodePacket.e,AdpcmDecoder,Packet	method decodePacket(d: AdpcmDecoder; pkt: Packet): AudioSamples		334
+nim	lastDecoded	audio/codecs/adpcm.html#lastDecoded.e,AdpcmDecoder	method lastDecoded(d: AdpcmDecoder): AudioSamples		351
+nim	adpcmDecoderFactory	audio/codecs/adpcm.html#adpcmDecoderFactory,AudioCodecParameters,AudioDecoderOptions	proc adpcmDecoderFactory(params: AudioCodecParameters; opts: AudioDecoderOptions): AudioDecoder		353
+nim	registerAdpcm	audio/codecs/adpcm.html#registerAdpcm	proc registerAdpcm()		357
+nim	toS16Samples	audio/codecs/adpcm.html#toS16Samples,AudioSamples	proc toS16Samples(buf: AudioSamples): tuple[spec: AudioSpec, planes: seq[seq[int16]]]		364
+nim	encodeMsMonoBlock	audio/codecs/adpcm.html#encodeMsMonoBlock,openArray[int16]	proc encodeMsMonoBlock(samples: openArray[int16]): seq[uint8]		381
+nim	encodeMsStereoBlock	audio/codecs/adpcm.html#encodeMsStereoBlock,openArray[int16],openArray[int16]	proc encodeMsStereoBlock(left, right: openArray[int16]): seq[uint8]		438
+nim	encodeImaWavMonoBlock	audio/codecs/adpcm.html#encodeImaWavMonoBlock,openArray[int16]	proc encodeImaWavMonoBlock(samples: openArray[int16]): seq[uint8]		545
+nim	encodeImaWavStereoBlock	audio/codecs/adpcm.html#encodeImaWavStereoBlock,openArray[int16],openArray[int16]	proc encodeImaWavStereoBlock(left, right: openArray[int16]): seq[uint8]		558
+nim	encodeImaQtMonoBlock	audio/codecs/adpcm.html#encodeImaQtMonoBlock,openArray[int16]	proc encodeImaQtMonoBlock(samples: openArray[int16]): seq[uint8]		585
+nim	encodeImaQtStereoBlock	audio/codecs/adpcm.html#encodeImaQtStereoBlock,openArray[int16],openArray[int16]	proc encodeImaQtStereoBlock(left, right: openArray[int16]): seq[uint8]		597

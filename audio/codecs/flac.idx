@@ -1,0 +1,43 @@
+nimTitle	flac	audio/codecs/flac.html	module audio/codecs/flac		0
+nim	StreamInfo	audio/codecs/flac.html#StreamInfo	object StreamInfo		24
+nim	parseStreamInfo	audio/codecs/flac.html#parseStreamInfo,openArray[uint8]	proc parseStreamInfo(data: openArray[uint8]): StreamInfo		36
+nim	writeStreamInfo	audio/codecs/flac.html#writeStreamInfo,StreamInfo	proc writeStreamInfo(info: StreamInfo): seq[uint8]		73
+nim	bsSample	audio/codecs/flac.html#bsSample	BlockSequenceKind.bsSample		98
+nim	bsFrame	audio/codecs/flac.html#bsFrame	BlockSequenceKind.bsFrame		98
+nim	BlockSequenceKind	audio/codecs/flac.html#BlockSequenceKind	enum BlockSequenceKind		98
+nim	BlockSequence	audio/codecs/flac.html#BlockSequence	object BlockSequence		102
+nim	caIndependent	audio/codecs/flac.html#caIndependent	ChannelAssignmentKind.caIndependent		109
+nim	caLeftSide	audio/codecs/flac.html#caLeftSide	ChannelAssignmentKind.caLeftSide		109
+nim	caRightSide	audio/codecs/flac.html#caRightSide	ChannelAssignmentKind.caRightSide		109
+nim	caMidSide	audio/codecs/flac.html#caMidSide	ChannelAssignmentKind.caMidSide		109
+nim	ChannelAssignmentKind	audio/codecs/flac.html#ChannelAssignmentKind	enum ChannelAssignmentKind		109
+nim	ChannelAssignment	audio/codecs/flac.html#ChannelAssignment	object ChannelAssignment		115
+nim	FrameHeader	audio/codecs/flac.html#FrameHeader	object FrameHeader		122
+nim	FlacMinFrameHeaderSize	audio/codecs/flac.html#FlacMinFrameHeaderSize	const FlacMinFrameHeaderSize		130
+nim	FlacMaxFrameHeaderSize	audio/codecs/flac.html#FlacMaxFrameHeaderSize	const FlacMaxFrameHeaderSize		131
+nim	FlacMaxFrameSize	audio/codecs/flac.html#FlacMaxFrameSize	const FlacMaxFrameSize		132
+nim	syncFrame	audio/codecs/flac.html#syncFrame,Reader	proc syncFrame(r: var Reader): uint16		134
+nim	readFrameHeader	audio/codecs/flac.html#readFrameHeader,Reader,uint16	proc readFrameHeader(r: var Reader; sync: uint16): FrameHeader		142
+nim	isLikelyFrameHeader	audio/codecs/flac.html#isLikelyFrameHeader,openArray[uint8]	proc isLikelyFrameHeader(buf: openArray[uint8]): bool		261
+nim	FlacValidator	audio/codecs/flac.html#FlacValidator	object FlacValidator		283
+nim	initValidator	audio/codecs/flac.html#initValidator,FlacValidator	proc initValidator(v: var FlacValidator)		286
+nim	updateValidator	audio/codecs/flac.html#updateValidator,FlacValidator,AudioBuffer[int32],uint32	proc updateValidator(v: var FlacValidator; buf: AudioBuffer[int32]; bps: uint32)		289
+nim	validatorDigest	audio/codecs/flac.html#validatorDigest,FlacValidator	proc validatorDigest(v: FlacValidator): array[16, uint8]		332
+nim	riceSignedToI32	audio/codecs/flac.html#riceSignedToI32,uint32	proc riceSignedToI32(word: uint32): int32		337
+nim	decodeSubframe	audio/codecs/flac.html#decodeSubframe,BitReader,int,openArray[int32]	proc decodeSubframe(bs: var BitReader; frameBps: int; buf: var openArray[int32])		476
+nim	FlacDecoder	audio/codecs/flac.html#FlacDecoder	type FlacDecoder		518
+nim	isSupportedFlacCodec	audio/codecs/flac.html#isSupportedFlacCodec,AudioCodecId	proc isSupportedFlacCodec(id: AudioCodecId): bool		525
+nim	newFlacDecoder	audio/codecs/flac.html#newFlacDecoder,AudioCodecParameters	proc newFlacDecoder(params: AudioCodecParameters; opts = defaultDecoderOptions()): FlacDecoder		528
+nim	codecParams	audio/codecs/flac.html#codecParams.e,FlacDecoder	method codecParams(d: FlacDecoder): AudioCodecParameters		601
+nim	reset	audio/codecs/flac.html#reset.e,FlacDecoder	method reset(d: FlacDecoder)		603
+nim	decodePacket	audio/codecs/flac.html#decodePacket.e,FlacDecoder,Packet	method decodePacket(d: FlacDecoder; pkt: Packet): AudioSamples		606
+nim	lastDecoded	audio/codecs/flac.html#lastDecoded.e,FlacDecoder	method lastDecoded(d: FlacDecoder): AudioSamples		614
+nim	finalize	audio/codecs/flac.html#finalize.e,FlacDecoder	method finalize(d: FlacDecoder): FinalizeResult		616
+nim	flacDecoderFactory	audio/codecs/flac.html#flacDecoderFactory,AudioCodecParameters,AudioDecoderOptions	proc flacDecoderFactory(params: AudioCodecParameters; opts: AudioDecoderOptions): AudioDecoder		624
+nim	registerFlac	audio/codecs/flac.html#registerFlac	proc registerFlac()		628
+nim	riceUnsigned	audio/codecs/flac.html#riceUnsigned,int32	proc riceUnsigned(v: int32): uint32		633
+nim	bestRiceParam	audio/codecs/flac.html#bestRiceParam,openArray[int32]	proc bestRiceParam(residuals: openArray[int32]): tuple[k: int, escape: bool,\n    width: int]		637
+nim	encodeRicePartition	audio/codecs/flac.html#encodeRicePartition,BitWriter,openArray[int32]	proc encodeRicePartition(w: var BitWriter; residuals: openArray[int32])		680
+nim	fixedResiduals	audio/codecs/flac.html#fixedResiduals,int,openArray[int32]	proc fixedResiduals(order: int; samples: openArray[int32]): seq[int32]		698
+nim	encodeSubframe	audio/codecs/flac.html#encodeSubframe,BitWriter,openArray[int32],int	proc encodeSubframe(w: var BitWriter; samples: openArray[int32]; bps: int)		732
+nim	encodeFlacFrame	audio/codecs/flac.html#encodeFlacFrame,openArray[seq[int32]],uint32,int	proc encodeFlacFrame(planes: openArray[seq[int32]]; frameNum: uint32; bps: int): seq[\n    uint8]		804

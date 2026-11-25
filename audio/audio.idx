@@ -1,0 +1,135 @@
+nimTitle	audio	audio/audio.html	module audio/audio		0
+nim	sfU8	audio/audio.html#sfU8	SampleFormat.sfU8		13
+nim	sfU16	audio/audio.html#sfU16	SampleFormat.sfU16		13
+nim	sfU24	audio/audio.html#sfU24	SampleFormat.sfU24		13
+nim	sfU32	audio/audio.html#sfU32	SampleFormat.sfU32		13
+nim	sfS8	audio/audio.html#sfS8	SampleFormat.sfS8		13
+nim	sfS16	audio/audio.html#sfS16	SampleFormat.sfS16		13
+nim	sfS24	audio/audio.html#sfS24	SampleFormat.sfS24		13
+nim	sfS32	audio/audio.html#sfS32	SampleFormat.sfS32		13
+nim	sfF32	audio/audio.html#sfF32	SampleFormat.sfF32		13
+nim	sfF64	audio/audio.html#sfF64	SampleFormat.sfF64		13
+nim	SampleFormat	audio/audio.html#SampleFormat	enum SampleFormat		13
+nim	Position	audio/audio.html#Position	type Position		26
+nim	PosFrontLeft	audio/audio.html#PosFrontLeft	const PosFrontLeft		31
+nim	PosFrontRight	audio/audio.html#PosFrontRight	const PosFrontRight		32
+nim	PosFrontCenter	audio/audio.html#PosFrontCenter	const PosFrontCenter		33
+nim	PosLfe1	audio/audio.html#PosLfe1	const PosLfe1		34
+nim	PosRearLeft	audio/audio.html#PosRearLeft	const PosRearLeft		35
+nim	PosRearRight	audio/audio.html#PosRearRight	const PosRearRight		36
+nim	PosFrontLeftCenter	audio/audio.html#PosFrontLeftCenter	const PosFrontLeftCenter		37
+nim	PosFrontRightCenter	audio/audio.html#PosFrontRightCenter	const PosFrontRightCenter		38
+nim	PosRearCenter	audio/audio.html#PosRearCenter	const PosRearCenter		39
+nim	PosSideLeft	audio/audio.html#PosSideLeft	const PosSideLeft		40
+nim	PosSideRight	audio/audio.html#PosSideRight	const PosSideRight		41
+nim	PosTopCenter	audio/audio.html#PosTopCenter	const PosTopCenter		42
+nim	PosTopFrontLeft	audio/audio.html#PosTopFrontLeft	const PosTopFrontLeft		43
+nim	PosTopFrontCenter	audio/audio.html#PosTopFrontCenter	const PosTopFrontCenter		44
+nim	PosTopFrontRight	audio/audio.html#PosTopFrontRight	const PosTopFrontRight		45
+nim	PosTopRearLeft	audio/audio.html#PosTopRearLeft	const PosTopRearLeft		46
+nim	PosTopRearCenter	audio/audio.html#PosTopRearCenter	const PosTopRearCenter		47
+nim	PosTopRearRight	audio/audio.html#PosTopRearRight	const PosTopRearRight		48
+nim	PosLfe2	audio/audio.html#PosLfe2	const PosLfe2		49
+nim	ckNone	audio/audio.html#ckNone	ChannelKind.ckNone		52
+nim	ckPositioned	audio/audio.html#ckPositioned	ChannelKind.ckPositioned		52
+nim	ckDiscrete	audio/audio.html#ckDiscrete	ChannelKind.ckDiscrete		52
+nim	ChannelKind	audio/audio.html#ChannelKind	enum ChannelKind		52
+nim	Channels	audio/audio.html#Channels	object Channels		57
+nim	ChMono	audio/audio.html#ChMono	const ChMono		70
+nim	ChStereo	audio/audio.html#ChStereo	const ChStereo		71
+nim	ChQuad	audio/audio.html#ChQuad	const ChQuad		74
+nim	Ch3	audio/audio.html#Ch3	const Ch3		79
+nim	Ch5	audio/audio.html#Ch5	const Ch5		81
+nim	Ch51	audio/audio.html#Ch51	const Ch51		84
+nim	Ch7	audio/audio.html#Ch7	const Ch7		87
+nim	Ch71	audio/audio.html#Ch71	const Ch71		90
+nim	positioned	audio/audio.html#positioned,Position	proc positioned(mask: Position): Channels		94
+nim	flacChannels	audio/audio.html#flacChannels,int	proc flacChannels(n: int): Channels		97
+nim	discrete	audio/audio.html#discrete,int	proc discrete(n: int): Channels		110
+nim	channelCount	audio/audio.html#channelCount,Channels	proc channelCount(c: Channels): int		113
+nim	`==`	audio/audio.html#==,Channels,Channels	proc `==`(a, b: Channels): bool		125
+nim	positionFromCount	audio/audio.html#positionFromCount,int	proc positionFromCount(n: int): Option[Position]		133
+nim	sampleWidthBits	audio/audio.html#sampleWidthBits,SampleFormat	proc sampleWidthBits(fmt: SampleFormat): int		145
+nim	packedWidthBytes	audio/audio.html#packedWidthBytes,SampleFormat	proc packedWidthBytes(fmt: SampleFormat): int		154
+nim	storageWidthBytes	audio/audio.html#storageWidthBytes,SampleFormat	proc storageWidthBytes(fmt: SampleFormat): int		163
+nim	silenceU8	audio/audio.html#silenceU8	proc silenceU8(): uint8		171
+nim	silenceU16	audio/audio.html#silenceU16	proc silenceU16(): uint16		172
+nim	silenceU24	audio/audio.html#silenceU24	proc silenceU24(): uint32		173
+nim	silenceU32	audio/audio.html#silenceU32	proc silenceU32(): uint32		174
+nim	silence	audio/audio.html#silence,typedesc[S]	proc silence[S](T: typedesc[S]): S		176
+nim	clampU24	audio/audio.html#clampU24,uint32	proc clampU24(v: uint32): uint32		190
+nim	clampI16	audio/audio.html#clampI16,int32	proc clampI16(v: int32): int32		193
+nim	clampI24	audio/audio.html#clampI24,int32	proc clampI24(v: int32): int32		198
+nim	toI8	audio/audio.html#toI8,int8	proc toI8(s: int8): int8		206
+nim	toI8	audio/audio.html#toI8,int16	proc toI8(s: int16): int8		207
+nim	toI8	audio/audio.html#toI8,int32	proc toI8(s: int32): int8		208
+nim	toI8	audio/audio.html#toI8,uint8	proc toI8(s: uint8): int8		209
+nim	toI16	audio/audio.html#toI16,int8	proc toI16(s: int8): int16		211
+nim	toI16	audio/audio.html#toI16,int16	proc toI16(s: int16): int16		212
+nim	toI16	audio/audio.html#toI16,int32	proc toI16(s: int32): int16		213
+nim	toI16	audio/audio.html#toI16,uint16	proc toI16(s: uint16): int16		214
+nim	toI24	audio/audio.html#toI24,int8	proc toI24(s: int8): int32		216
+nim	toI24	audio/audio.html#toI24,int16	proc toI24(s: int16): int32		217
+nim	toI24	audio/audio.html#toI24,int32	proc toI24(s: int32): int32		218
+nim	toI24	audio/audio.html#toI24,uint32	proc toI24(s: uint32): int32		219
+nim	toI32	audio/audio.html#toI32,int8	proc toI32(s: int8): int32		221
+nim	toI32	audio/audio.html#toI32,int16	proc toI32(s: int16): int32		222
+nim	toI32	audio/audio.html#toI32,int32	proc toI32(s: int32): int32		223
+nim	toI32	audio/audio.html#toI32,uint32	proc toI32(s: uint32): int32		224
+nim	toU8	audio/audio.html#toU8,uint8	proc toU8(s: uint8): uint8		226
+nim	toU8	audio/audio.html#toU8,uint16	proc toU8(s: uint16): uint8		227
+nim	toU8	audio/audio.html#toU8,uint32	proc toU8(s: uint32): uint8		228
+nim	toU8	audio/audio.html#toU8,int8	proc toU8(s: int8): uint8		229
+nim	toU16	audio/audio.html#toU16,uint8	proc toU16(s: uint8): uint16		231
+nim	toU16	audio/audio.html#toU16,uint16	proc toU16(s: uint16): uint16		232
+nim	toU16	audio/audio.html#toU16,uint32	proc toU16(s: uint32): uint16		233
+nim	toU16	audio/audio.html#toU16,int16	proc toU16(s: int16): uint16		234
+nim	toU24	audio/audio.html#toU24,uint8	proc toU24(s: uint8): uint32		236
+nim	toU24	audio/audio.html#toU24,uint16	proc toU24(s: uint16): uint32		237
+nim	toU24	audio/audio.html#toU24,uint32	proc toU24(s: uint32): uint32		238
+nim	toU24	audio/audio.html#toU24,int32	proc toU24(s: int32): uint32		239
+nim	toU32	audio/audio.html#toU32,uint8	proc toU32(s: uint8): uint32		242
+nim	toU32	audio/audio.html#toU32,uint16	proc toU32(s: uint16): uint32		243
+nim	toU32	audio/audio.html#toU32,uint32	proc toU32(s: uint32): uint32		244
+nim	toU32	audio/audio.html#toU32,int32	proc toU32(s: int32): uint32		245
+nim	toF32	audio/audio.html#toF32,int8	proc toF32(s: int8): float32		249
+nim	toF32	audio/audio.html#toF32,int16	proc toF32(s: int16): float32		250
+nim	toF32	audio/audio.html#toF32,int32	proc toF32(s: int32): float32		251
+nim	toF32	audio/audio.html#toF32,uint8	proc toF32(s: uint8): float32		252
+nim	toF32	audio/audio.html#toF32,uint32	proc toF32(s: uint32): float32		253
+nim	toF64	audio/audio.html#toF64,int16	proc toF64(s: int16): float64		256
+nim	toF64	audio/audio.html#toF64,int32	proc toF64(s: int32): float64		257
+nim	toF64	audio/audio.html#toF64,float32	proc toF64(s: float32): float64		258
+nim	fromF32ToI16	audio/audio.html#fromF32ToI16,float32	proc fromF32ToI16(s: float32): int16		260
+nim	fromF32ToI32	audio/audio.html#fromF32ToI32,float32	proc fromF32ToI32(s: float32): int32		266
+nim	AudioSpec	audio/audio.html#AudioSpec	object AudioSpec		275
+nim	newAudioSpec	audio/audio.html#newAudioSpec,uint32,Channels	proc newAudioSpec(rate: uint32; channels: Channels): AudioSpec		279
+nim	AudioBuffer	audio/audio.html#AudioBuffer	object AudioBuffer		285
+nim	newAudioBuffer	audio/audio.html#newAudioBuffer,AudioSpec,int	proc newAudioBuffer[S](spec: AudioSpec; capacity: int): AudioBuffer[S]		292
+nim	isUnused	audio/audio.html#isUnused,AudioBuffer[S]	proc isUnused[S](b: AudioBuffer[S]): bool		303
+nim	frames	audio/audio.html#frames,AudioBuffer[S]	proc frames[S](b: AudioBuffer[S]): int		306
+nim	numPlanes	audio/audio.html#numPlanes,AudioBuffer[S]	proc numPlanes[S](b: AudioBuffer[S]): int		307
+nim	clear	audio/audio.html#clear,AudioBuffer[S]	proc clear[S](b: var AudioBuffer[S])		309
+nim	growCapacity	audio/audio.html#growCapacity,AudioBuffer[S],int	proc growCapacity[S](b: var AudioBuffer[S]; capacity: int)		311
+nim	resizeWithSilence	audio/audio.html#resizeWithSilence,AudioBuffer[S],int	proc resizeWithSilence[S](b: var AudioBuffer[S]; n: int)		321
+nim	renderWith	audio/audio.html#renderWith.t,AudioBuffer[S],int,untyped,untyped	template renderWith[S](b: var AudioBuffer[S]; n: int; frameIdx: untyped; body: untyped)		328
+nim	shift	audio/audio.html#shift,AudioBuffer[S],int	proc shift[S](b: var AudioBuffer[S]; n: int)		338
+nim	truncate	audio/audio.html#truncate,AudioBuffer[S],int	proc truncate[S](b: var AudioBuffer[S]; n: int)		349
+nim	copyInterleavedFrom	audio/audio.html#copyInterleavedFrom,AudioBuffer[S],openArray[S]	proc copyInterleavedFrom[S](b: var AudioBuffer[S]; src: openArray[S])		352
+nim	copyInterleavedTo	audio/audio.html#copyInterleavedTo,AudioBuffer[S],openArray[S]	proc copyInterleavedTo[S](b: AudioBuffer[S]; dst: var openArray[S])		364
+nim	AudioSamples	audio/audio.html#AudioSamples	object AudioSamples		376
+nim	newAudioSamples	audio/audio.html#newAudioSamples,SampleFormat,AudioSpec,int	proc newAudioSamples(format: SampleFormat; spec: AudioSpec; capacity: int): AudioSamples		390
+nim	specOf	audio/audio.html#specOf,AudioSamples	proc specOf(s: AudioSamples): AudioSpec		404
+nim	framesOf	audio/audio.html#framesOf,AudioSamples	proc framesOf(s: AudioSamples): int		417
+nim	clearSamples	audio/audio.html#clearSamples,AudioSamples	proc clearSamples(s: var AudioSamples)		430
+nim	growSamples	audio/audio.html#growSamples,AudioSamples,int	proc growSamples(s: var AudioSamples; capacity: int)		443
+nimgrp	tof32	audio/audio.html#toF32-procs-all	proc		249
+nimgrp	toi24	audio/audio.html#toI24-procs-all	proc		216
+nimgrp	tou16	audio/audio.html#toU16-procs-all	proc		231
+nimgrp	toi32	audio/audio.html#toI32-procs-all	proc		221
+nimgrp	toi16	audio/audio.html#toI16-procs-all	proc		211
+nimgrp	tou32	audio/audio.html#toU32-procs-all	proc		242
+nimgrp	tou8	audio/audio.html#toU8-procs-all	proc		226
+nimgrp	tof64	audio/audio.html#toF64-procs-all	proc		256
+nimgrp	tou24	audio/audio.html#toU24-procs-all	proc		236
+nimgrp	toi8	audio/audio.html#toI8-procs-all	proc		206

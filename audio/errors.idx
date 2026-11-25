@@ -1,0 +1,26 @@
+nimTitle	errors	audio/errors.html	module audio/errors		0
+nim	ekIo	audio/errors.html#ekIo	AudioErrorKind.ekIo		9
+nim	ekDecode	audio/errors.html#ekDecode	AudioErrorKind.ekDecode		9
+nim	ekSeek	audio/errors.html#ekSeek	AudioErrorKind.ekSeek		9
+nim	ekUnsupported	audio/errors.html#ekUnsupported	AudioErrorKind.ekUnsupported		9
+nim	ekLimit	audio/errors.html#ekLimit	AudioErrorKind.ekLimit		9
+nim	ekResetRequired	audio/errors.html#ekResetRequired	AudioErrorKind.ekResetRequired		9
+nim	AudioErrorKind	audio/errors.html#AudioErrorKind	enum AudioErrorKind		9
+nim	skUnseekable	audio/errors.html#skUnseekable	SeekErrorKind.skUnseekable		17
+nim	skForwardOnly	audio/errors.html#skForwardOnly	SeekErrorKind.skForwardOnly		17
+nim	skOutOfRange	audio/errors.html#skOutOfRange	SeekErrorKind.skOutOfRange		17
+nim	skInvalidTrack	audio/errors.html#skInvalidTrack	SeekErrorKind.skInvalidTrack		17
+nim	SeekErrorKind	audio/errors.html#SeekErrorKind	enum SeekErrorKind		17
+nim	AudioError	audio/errors.html#AudioError	object AudioError		23
+nim	EndOfStream	audio/errors.html#EndOfStream	object EndOfStream		27
+nim	newAudioError	audio/errors.html#newAudioError,AudioErrorKind,string	proc newAudioError(kind: AudioErrorKind; msg: string; seekKind = skUnseekable): ref AudioError		32
+nim	ioError	audio/errors.html#ioError,string	proc ioError(msg: string): ref AudioError		40
+nim	decodeError	audio/errors.html#decodeError,string	proc decodeError(msg: string): ref AudioError		43
+nim	seekError	audio/errors.html#seekError,SeekErrorKind	proc seekError(kind: SeekErrorKind): ref AudioError		46
+nim	unsupportedError	audio/errors.html#unsupportedError,string	proc unsupportedError(feature: string): ref AudioError		55
+nim	limitError	audio/errors.html#limitError,string	proc limitError(constraint: string): ref AudioError		58
+nim	resetError	audio/errors.html#resetError	proc resetError(): ref AudioError		61
+nim	raiseDecode	audio/errors.html#raiseDecode.t,string	template raiseDecode(msg: string)		64
+nim	raiseUnsupported	audio/errors.html#raiseUnsupported.t,string	template raiseUnsupported(feature: string)		68
+nim	raiseLimit	audio/errors.html#raiseLimit.t,string	template raiseLimit(constraint: string)		71
+nim	checkDecode	audio/errors.html#checkDecode.t,bool,string	template checkDecode(cond: bool; msg: string)		74

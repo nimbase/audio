@@ -1,0 +1,17 @@
+nimTitle	metadata	audio/metadata.html	module audio/metadata		0
+nim	rvString	audio/metadata.html#rvString	RawValueKind.rvString		10
+nim	rvSignedInt	audio/metadata.html#rvSignedInt	RawValueKind.rvSignedInt		10
+nim	rvUnsignedInt	audio/metadata.html#rvUnsignedInt	RawValueKind.rvUnsignedInt		10
+nim	rvFloat	audio/metadata.html#rvFloat	RawValueKind.rvFloat		10
+nim	rvBoolean	audio/metadata.html#rvBoolean	RawValueKind.rvBoolean		10
+nim	rvBinary	audio/metadata.html#rvBinary	RawValueKind.rvBinary		10
+nim	RawValueKind	audio/metadata.html#RawValueKind	enum RawValueKind		10
+nim	RawValue	audio/metadata.html#RawValue	object RawValue		18
+nim	Tag	audio/metadata.html#Tag	object Tag		33
+nim	MetadataRevision	audio/metadata.html#MetadataRevision	object MetadataRevision		40
+nim	MetadataLog	audio/metadata.html#MetadataLog	object MetadataLog		43
+nim	strValue	audio/metadata.html#strValue,string	proc strValue(s: string): RawValue		46
+nim	newTag	audio/metadata.html#newTag,string,RawValue	proc newTag(key: string; value: RawValue; stdKey = none(string)): Tag		48
+nim	addTag	audio/metadata.html#addTag,MetadataRevision,Tag	proc addTag(rev: var MetadataRevision; tag: Tag)		51
+nim	push	audio/metadata.html#push,MetadataLog,MetadataRevision	proc push(log: var MetadataLog; rev: MetadataRevision)		54
+nim	latest	audio/metadata.html#latest,MetadataLog	proc latest(log: MetadataLog): Option[MetadataRevision]		57

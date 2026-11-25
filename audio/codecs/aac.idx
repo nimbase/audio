@@ -1,0 +1,112 @@
+nimTitle	aac	audio/codecs/aac.html	module audio/codecs/aac		0
+nim	AotNone	audio/codecs/aac.html#AotNone	AacObjectType.AotNone		28
+nim	AotMain	audio/codecs/aac.html#AotMain	AacObjectType.AotMain		28
+nim	AotLc	audio/codecs/aac.html#AotLc	AacObjectType.AotLc		28
+nim	AotSsr	audio/codecs/aac.html#AotSsr	AacObjectType.AotSsr		28
+nim	AotLtp	audio/codecs/aac.html#AotLtp	AacObjectType.AotLtp		28
+nim	AotSbr	audio/codecs/aac.html#AotSbr	AacObjectType.AotSbr		28
+nim	AotScalable	audio/codecs/aac.html#AotScalable	AacObjectType.AotScalable		28
+nim	AotTwinVq	audio/codecs/aac.html#AotTwinVq	AacObjectType.AotTwinVq		28
+nim	AotCelp	audio/codecs/aac.html#AotCelp	AacObjectType.AotCelp		28
+nim	AotHvxc	audio/codecs/aac.html#AotHvxc	AacObjectType.AotHvxc		28
+nim	AotReserved10	audio/codecs/aac.html#AotReserved10	AacObjectType.AotReserved10		28
+nim	AotReserved11	audio/codecs/aac.html#AotReserved11	AacObjectType.AotReserved11		28
+nim	AotTtsi	audio/codecs/aac.html#AotTtsi	AacObjectType.AotTtsi		28
+nim	AotMainSynth	audio/codecs/aac.html#AotMainSynth	AacObjectType.AotMainSynth		28
+nim	AotWavetableSynth	audio/codecs/aac.html#AotWavetableSynth	AacObjectType.AotWavetableSynth		28
+nim	AotGeneralMidi	audio/codecs/aac.html#AotGeneralMidi	AacObjectType.AotGeneralMidi		28
+nim	AotAlgorithmic	audio/codecs/aac.html#AotAlgorithmic	AacObjectType.AotAlgorithmic		28
+nim	AotErAacLc	audio/codecs/aac.html#AotErAacLc	AacObjectType.AotErAacLc		28
+nim	AotReserved18	audio/codecs/aac.html#AotReserved18	AacObjectType.AotReserved18		28
+nim	AotErAacLtp	audio/codecs/aac.html#AotErAacLtp	AacObjectType.AotErAacLtp		28
+nim	AotErAacScalable	audio/codecs/aac.html#AotErAacScalable	AacObjectType.AotErAacScalable		28
+nim	AotErTwinVq	audio/codecs/aac.html#AotErTwinVq	AacObjectType.AotErTwinVq		28
+nim	AotErBsac	audio/codecs/aac.html#AotErBsac	AacObjectType.AotErBsac		28
+nim	AotErAacLd	audio/codecs/aac.html#AotErAacLd	AacObjectType.AotErAacLd		28
+nim	AotErCelp	audio/codecs/aac.html#AotErCelp	AacObjectType.AotErCelp		28
+nim	AotErHvxc	audio/codecs/aac.html#AotErHvxc	AacObjectType.AotErHvxc		28
+nim	AotErHiln	audio/codecs/aac.html#AotErHiln	AacObjectType.AotErHiln		28
+nim	AotErParametric	audio/codecs/aac.html#AotErParametric	AacObjectType.AotErParametric		28
+nim	AotSsc	audio/codecs/aac.html#AotSsc	AacObjectType.AotSsc		28
+nim	AotPs	audio/codecs/aac.html#AotPs	AacObjectType.AotPs		28
+nim	AotMpegSurround	audio/codecs/aac.html#AotMpegSurround	AacObjectType.AotMpegSurround		28
+nim	AotReservedEscape	audio/codecs/aac.html#AotReservedEscape	AacObjectType.AotReservedEscape		28
+nim	AotLayer1	audio/codecs/aac.html#AotLayer1	AacObjectType.AotLayer1		28
+nim	AotLayer2	audio/codecs/aac.html#AotLayer2	AacObjectType.AotLayer2		28
+nim	AotLayer3	audio/codecs/aac.html#AotLayer3	AacObjectType.AotLayer3		28
+nim	AotDst	audio/codecs/aac.html#AotDst	AacObjectType.AotDst		28
+nim	AotAls	audio/codecs/aac.html#AotAls	AacObjectType.AotAls		28
+nim	AotSls	audio/codecs/aac.html#AotSls	AacObjectType.AotSls		28
+nim	AotSlsNonCore	audio/codecs/aac.html#AotSlsNonCore	AacObjectType.AotSlsNonCore		28
+nim	AotErAacEld	audio/codecs/aac.html#AotErAacEld	AacObjectType.AotErAacEld		28
+nim	AotSmrSimple	audio/codecs/aac.html#AotSmrSimple	AacObjectType.AotSmrSimple		28
+nim	AotSmrMain	audio/codecs/aac.html#AotSmrMain	AacObjectType.AotSmrMain		28
+nim	AotUnknown	audio/codecs/aac.html#AotUnknown	AacObjectType.AotUnknown		28
+nim	AacObjectType	audio/codecs/aac.html#AacObjectType	enum AacObjectType		28
+nim	Mpeg4SampleRates	audio/codecs/aac.html#Mpeg4SampleRates	const Mpeg4SampleRates		74
+nim	AudioSpecificConfig	audio/codecs/aac.html#AudioSpecificConfig	object AudioSpecificConfig		78
+nim	readAacObjectType	audio/codecs/aac.html#readAacObjectType,LtrBitReader	proc readAacObjectType(bs: var LtrBitReader): AacObjectType		87
+nim	readAacSampleRate	audio/codecs/aac.html#readAacSampleRate,LtrBitReader	proc readAacSampleRate(bs: var LtrBitReader): uint32		100
+nim	aacChannelsByConfig	audio/codecs/aac.html#aacChannelsByConfig,int	proc aacChannelsByConfig(idx: int): Option[Channels]		117
+nim	readAudioSpecificConfig	audio/codecs/aac.html#readAudioSpecificConfig,openArray[uint8]	proc readAudioSpecificConfig(data: openArray[uint8]): AudioSpecificConfig		139
+nim	aacProfileOf	audio/codecs/aac.html#aacProfileOf,AudioSpecificConfig	proc aacProfileOf(asc: AudioSpecificConfig): string		256
+nim	OnlyLongSeq	audio/codecs/aac.html#OnlyLongSeq	const OnlyLongSeq		275
+nim	LongStartSeq	audio/codecs/aac.html#LongStartSeq	const LongStartSeq		276
+nim	EightShortSeq	audio/codecs/aac.html#EightShortSeq	const EightShortSeq		277
+nim	LongStopSeq	audio/codecs/aac.html#LongStopSeq	const LongStopSeq		278
+nim	MaxWindows	audio/codecs/aac.html#MaxWindows	const MaxWindows		279
+nim	MaxSfbs	audio/codecs/aac.html#MaxSfbs	const MaxSfbs		280
+nim	ZeroHcb	audio/codecs/aac.html#ZeroHcb	const ZeroHcb		281
+nim	ReservedHcb	audio/codecs/aac.html#ReservedHcb	const ReservedHcb		282
+nim	NoiseHcb	audio/codecs/aac.html#NoiseHcb	const NoiseHcb		283
+nim	IntensityHcb2	audio/codecs/aac.html#IntensityHcb2	const IntensityHcb2		284
+nim	IntensityHcb	audio/codecs/aac.html#IntensityHcb	const IntensityHcb		285
+nim	TnsMaxLongBands	audio/codecs/aac.html#TnsMaxLongBands	const TnsMaxLongBands		286
+nim	TnsMaxShortBands	audio/codecs/aac.html#TnsMaxShortBands	const TnsMaxShortBands		288
+nim	longBands	audio/codecs/aac.html#longBands,int	proc longBands(row: int): seq[int]		291
+nim	shortBands	audio/codecs/aac.html#shortBands,int	proc shortBands(row: int): seq[int]		309
+nim	subbandRow	audio/codecs/aac.html#subbandRow,uint32	proc subbandRow(sampleRate: uint32): int		323
+nim	initAacTables	audio/codecs/aac.html#initAacTables	proc initAacTables()		345
+nim	besselI0	audio/codecs/aac.html#besselI0,float64	proc besselI0(x: float64): float64		409
+nim	aacWindow	audio/codecs/aac.html#aacWindow,float64,int,openArray[float32]	proc aacWindow(kbdAlpha: float64; size: int; dst: var openArray[float32])		415
+nim	sineWindow	audio/codecs/aac.html#sineWindow,int,openArray[float32]	proc sineWindow(size: int; dst: var openArray[float32])		427
+nim	AacLcg	audio/codecs/aac.html#AacLcg	object AacLcg		434
+nim	lcgNext	audio/codecs/aac.html#lcgNext,AacLcg	proc lcgNext(g: var AacLcg): int32		437
+nim	IcsInfo	audio/codecs/aac.html#IcsInfo	object IcsInfo		442
+nim	TnsCoeffs	audio/codecs/aac.html#TnsCoeffs	object TnsCoeffs		454
+nim	Tns	audio/codecs/aac.html#Tns	object Tns		460
+nim	Pulse	audio/codecs/aac.html#Pulse	object Pulse		465
+nim	Ics	audio/codecs/aac.html#Ics	object Ics		472
+nim	defaultIcsInfo	audio/codecs/aac.html#defaultIcsInfo	proc defaultIcsInfo(): IcsInfo		483
+nim	resetIcs	audio/codecs/aac.html#resetIcs,Ics	proc resetIcs(c: var Ics)		489
+nim	decodeIcsInfo	audio/codecs/aac.html#decodeIcsInfo,LtrBitReader,IcsInfo	proc decodeIcsInfo(bs: var LtrBitReader; info: var IcsInfo)		494
+nim	groupStartOf	audio/codecs/aac.html#groupStartOf,IcsInfo,int	proc groupStartOf(info: IcsInfo; g: int): int		530
+nim	decodeSectionData	audio/codecs/aac.html#decodeSectionData,LtrBitReader,Ics	proc decodeSectionData(bs: var LtrBitReader; c: var Ics)		544
+nim	decodeScaleFactorData	audio/codecs/aac.html#decodeScaleFactorData,LtrBitReader,Ics	proc decodeScaleFactorData(bs: var LtrBitReader; c: var Ics)		578
+nim	decodeNoise	audio/codecs/aac.html#decodeNoise,AacLcg,float32,openArray[float32]	proc decodeNoise(g: var AacLcg; scale: float32; dst: var openArray[float32])		625
+nim	readAacEscape	audio/codecs/aac.html#readAacEscape,LtrBitReader	proc readAacEscape(bs: var LtrBitReader): int		635
+nim	decodeQuadsSigned	audio/codecs/aac.html#decodeQuadsSigned,LtrBitReader,VlcTable,float32,openArray[float32]	proc decodeQuadsSigned(bs: var LtrBitReader; cb: VlcTable; scale: float32;\n                  dst: var openArray[float32])		648
+nim	decodeQuadsUnsigned	audio/codecs/aac.html#decodeQuadsUnsigned,LtrBitReader,VlcTable,float32,openArray[float32]	proc decodeQuadsUnsigned(bs: var LtrBitReader; cb: VlcTable; scale: float32;\n                    dst: var openArray[float32])		664
+nim	decodePairsSigned	audio/codecs/aac.html#decodePairsSigned,LtrBitReader,int,float32,openArray[float32]	proc decodePairsSigned(bs: var LtrBitReader; t: int; scale: float32;\n                  dst: var openArray[float32])		691
+nim	decodePairsUnsigned	audio/codecs/aac.html#decodePairsUnsigned,LtrBitReader,int,float32,openArray[float32]	proc decodePairsUnsigned(bs: var LtrBitReader; t: int; scale: float32;\n                    dst: var openArray[float32])		704
+nim	decodePairsEscape	audio/codecs/aac.html#decodePairsEscape,LtrBitReader,float32,openArray[float32]	proc decodePairsEscape(bs: var LtrBitReader; scale: float32;\n                  dst: var openArray[float32])		723
+nim	decodeSpectrum	audio/codecs/aac.html#decodeSpectrum,LtrBitReader,AacLcg,Ics,openArray[int]	proc decodeSpectrum(bs: var LtrBitReader; g: var AacLcg; c: var Ics;\n               bands: openArray[int])		747
+nim	tnsSynth	audio/codecs/aac.html#tnsSynth,Ics,openArray[int],int,openArray[float32]	proc tnsSynth(c: Ics; bands: openArray[int]; rateIdx: int;\n         coeffs: var openArray[float32])		842
+nim	decodeIcs	audio/codecs/aac.html#decodeIcs,LtrBitReader,AacLcg,Ics,int,bool	proc decodeIcs(bs: var LtrBitReader; g: var AacLcg; c: var Ics; row: int;\n          commonWindow: bool)		873
+nim	pulseSynth	audio/codecs/aac.html#pulseSynth,Pulse,openArray[int],array[,array[,float32]],openArray[float32]	proc pulseSynth(p: Pulse; bands: openArray[int];\n           scales: array[8, array[64, float32]]; coeffs: var openArray[float32])		924
+nim	AacDsp	audio/codecs/aac.html#AacDsp	object AacDsp		951
+nim	newAacDsp	audio/codecs/aac.html#newAacDsp	proc newAacDsp(): AacDsp		959
+nim	dspSynth	audio/codecs/aac.html#dspSynth,AacDsp,array[,float32],array[,float32],int,bool,bool,openArray[float32]	proc dspSynth(d: var AacDsp; coeffs: array[1024, float32];\n         delay: var array[1024, float32]; seq: int; shape, prevShape: bool;\n         dst: var openArray[float32])		967
+nim	ChannelPair	audio/codecs/aac.html#ChannelPair	object ChannelPair		1048
+nim	newChannelPair	audio/codecs/aac.html#newChannelPair,bool,int	proc newChannelPair(isPair: bool; channel: int): ChannelPair		1057
+nim	resetPair	audio/codecs/aac.html#resetPair,ChannelPair	proc resetPair(p: var ChannelPair)		1062
+nim	decodeSce	audio/codecs/aac.html#decodeSce,LtrBitReader,ChannelPair,int	proc decodeSce(bs: var LtrBitReader; p: var ChannelPair; row: int)		1066
+nim	decodeCpe	audio/codecs/aac.html#decodeCpe,LtrBitReader,ChannelPair,int	proc decodeCpe(bs: var LtrBitReader; p: var ChannelPair; row: int)		1069
+nim	AacDecoder	audio/codecs/aac.html#AacDecoder	type AacDecoder		1139
+nim	newAacDecoder	audio/codecs/aac.html#newAacDecoder,AudioCodecParameters	proc newAacDecoder(params: AudioCodecParameters; opts = defaultDecoderOptions()): AacDecoder		1160
+nim	codecParams	audio/codecs/aac.html#codecParams.e,AacDecoder	method codecParams(d: AacDecoder): AudioCodecParameters		1261
+nim	reset	audio/codecs/aac.html#reset.e,AacDecoder	method reset(d: AacDecoder)		1263
+nim	decodePacket	audio/codecs/aac.html#decodePacket.e,AacDecoder,Packet	method decodePacket(d: AacDecoder; pkt: Packet): AudioSamples		1267
+nim	lastDecoded	audio/codecs/aac.html#lastDecoded.e,AacDecoder	method lastDecoded(d: AacDecoder): AudioSamples		1292
+nim	aacDecoderFactory	audio/codecs/aac.html#aacDecoderFactory,AudioCodecParameters,AudioDecoderOptions	proc aacDecoderFactory(params: AudioCodecParameters; opts: AudioDecoderOptions): AudioDecoder		1294
+nim	registerAac	audio/codecs/aac.html#registerAac	proc registerAac()		1298

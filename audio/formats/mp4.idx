@@ -1,0 +1,18 @@
+nimTitle	mp4	audio/formats/mp4.html	module audio/formats/mp4		0
+nim	Mp4FormatInfo	audio/formats/mp4.html#Mp4FormatInfo	const Mp4FormatInfo		31
+nim	MaxBoxDepth	audio/formats/mp4.html#MaxBoxDepth	const MaxBoxDepth		33
+nim	Mp4Box	audio/formats/mp4.html#Mp4Box	object Mp4Box		36
+nim	Mp4Sample	audio/formats/mp4.html#Mp4Sample	object Mp4Sample		42
+nim	Mp4TrackData	audio/formats/mp4.html#Mp4TrackData	object Mp4TrackData		48
+nim	Mp4Packet	audio/formats/mp4.html#Mp4Packet	object Mp4Packet		54
+nim	Mp4Reader	audio/formats/mp4.html#Mp4Reader	type Mp4Reader		60
+nim	boxName	audio/formats/mp4.html#boxName,Mp4Box	proc boxName(b: Mp4Box): string		70
+nim	`==`	audio/formats/mp4.html#==,Mp4Box,string	proc `==`(a: Mp4Box; name: string): bool		75
+nim	probeMp4	audio/formats/mp4.html#probeMp4,openArray[uint8]	proc probeMp4(data: openArray[uint8]): int		110
+nim	openMp4	audio/formats/mp4.html#openMp4,seq[uint8]	proc openMp4(data: seq[uint8]): Mp4Reader		620
+nim	trackCount	audio/formats/mp4.html#trackCount,Mp4Reader	proc trackCount(w: Mp4Reader): int		752
+nim	mediaInfo	audio/formats/mp4.html#mediaInfo,Mp4Reader	proc mediaInfo(w: Mp4Reader): MediaInfo		754
+nim	numFrames	audio/formats/mp4.html#numFrames,Mp4Reader	proc numFrames(w: Mp4Reader): Option[uint64]		761
+nim	packetBytes	audio/formats/mp4.html#packetBytes,Mp4Reader,Mp4Packet	proc packetBytes(w: Mp4Reader; p: Mp4Packet): seq[uint8]		763
+nim	nextPacket	audio/formats/mp4.html#nextPacket,Mp4Reader	proc nextPacket(w: Mp4Reader): Option[Packet]		767
+nim	seek	audio/formats/mp4.html#seek,Mp4Reader,SeekTo	proc seek(w: Mp4Reader; to: SeekTo): SeekedTo		779

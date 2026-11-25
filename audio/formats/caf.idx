@@ -1,0 +1,13 @@
+nimTitle	caf	audio/formats/caf.html	module audio/formats/caf		0
+nim	CafFormatInfo	audio/formats/caf.html#CafFormatInfo	const CafFormatInfo		30
+nim	CafMaxFramesPerPacket	audio/formats/caf.html#CafMaxFramesPerPacket	const CafMaxFramesPerPacket		32
+nim	CafPacket	audio/formats/caf.html#CafPacket	object CafPacket		35
+nim	CafReader	audio/formats/caf.html#CafReader	type CafReader		41
+nim	probeCaf	audio/formats/caf.html#probeCaf,openArray[uint8]	proc probeCaf(data: openArray[uint8]): int		54
+nim	CafDesc	audio/formats/caf.html#CafDesc	object CafDesc		141
+nim	openCaf	audio/formats/caf.html#openCaf,seq[uint8]	proc openCaf(data: seq[uint8]): CafReader		207
+nim	trackCount	audio/formats/caf.html#trackCount,CafReader	proc trackCount(w: CafReader): int		393
+nim	mediaInfo	audio/formats/caf.html#mediaInfo,CafReader	proc mediaInfo(w: CafReader): MediaInfo		395
+nim	numFrames	audio/formats/caf.html#numFrames,CafReader	proc numFrames(w: CafReader): Option[uint64]		399
+nim	nextPacket	audio/formats/caf.html#nextPacket,CafReader	proc nextPacket(w: CafReader): Option[Packet]		401
+nim	seek	audio/formats/caf.html#seek,CafReader,SeekTo	proc seek(w: CafReader; to: SeekTo): SeekedTo		437

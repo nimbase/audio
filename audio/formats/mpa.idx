@@ -1,0 +1,23 @@
+nimTitle	mpa	audio/formats/mpa.html	module audio/formats/mpa		0
+nim	MpaFormatInfo	audio/formats/mpa.html#MpaFormatInfo	const MpaFormatInfo		25
+nim	MpaPacket	audio/formats/mpa.html#MpaPacket	object MpaPacket		29
+nim	MpaReader	audio/formats/mpa.html#MpaReader	type MpaReader		37
+nim	probeMpa	audio/formats/mpa.html#probeMpa,openArray[uint8]	proc probeMpa(data: openArray[uint8]): int		46
+nim	syncMpaFrame	audio/formats/mpa.html#syncMpaFrame,seq[uint8],int	proc syncMpaFrame(data: seq[uint8]; pos: var int): uint32		87
+nim	readMpaFrame	audio/formats/mpa.html#readMpaFrame,seq[uint8],int	proc readMpaFrame(data: seq[uint8]; pos: var int): tuple[header: FrameHeader,\n    start: int]		105
+nim	infoTagOffset	audio/formats/mpa.html#infoTagOffset,FrameHeader	proc infoTagOffset(header: FrameHeader): int		140
+nim	isMaybeInfoTag	audio/formats/mpa.html#isMaybeInfoTag,seq[uint8],FrameHeader	proc isMaybeInfoTag(data: seq[uint8]; header: FrameHeader): bool		143
+nim	readBeU24	audio/formats/mpa.html#readBeU24,openArray[uint8],int	proc readBeU24(data: openArray[uint8]; at: int): uint32		160
+nim	tryReadInfoTag	audio/formats/mpa.html#tryReadInfoTag,seq[uint8],FrameHeader	proc tryReadInfoTag(data: seq[uint8]; header: FrameHeader): tuple[ok: bool,\n    numFrames: uint32, delay, padding: int]		164
+nim	vbriTagOffset	audio/formats/mpa.html#vbriTagOffset	proc vbriTagOffset(): int		250
+nim	isMaybeVbriTag	audio/formats/mpa.html#isMaybeVbriTag,seq[uint8],FrameHeader	proc isMaybeVbriTag(data: seq[uint8]; header: FrameHeader): bool		252
+nim	tryReadVbriTag	audio/formats/mpa.html#tryReadVbriTag,seq[uint8],FrameHeader	proc tryReadVbriTag(data: seq[uint8]; header: FrameHeader): tuple[ok: bool,\n    numFrames: uint32]		266
+nim	estimateNumFrames	audio/formats/mpa.html#estimateNumFrames,seq[uint8],int	proc estimateNumFrames(data: seq[uint8]; start: int): Option[uint64]		285
+nim	openMpa	audio/formats/mpa.html#openMpa,seq[uint8]	proc openMpa(data: seq[uint8]): MpaReader		308
+nim	trackCount	audio/formats/mpa.html#trackCount,MpaReader	proc trackCount(w: MpaReader): int		395
+nim	mediaInfo	audio/formats/mpa.html#mediaInfo,MpaReader	proc mediaInfo(w: MpaReader): MediaInfo		397
+nim	numFrames	audio/formats/mpa.html#numFrames,MpaReader	proc numFrames(w: MpaReader): Option[uint64]		401
+nim	packetBytes	audio/formats/mpa.html#packetBytes,MpaReader,MpaPacket	proc packetBytes(w: MpaReader; p: MpaPacket): seq[uint8]		403
+nim	nextPacket	audio/formats/mpa.html#nextPacket,MpaReader	proc nextPacket(w: MpaReader): Option[Packet]		406
+nim	mainDataBeginAt	audio/formats/mpa.html#mainDataBeginAt,seq[uint8],int,FrameHeader	proc mainDataBeginAt(data: seq[uint8]; start: int; header: FrameHeader): int		417
+nim	seek	audio/formats/mpa.html#seek,MpaReader,SeekTo	proc seek(w: MpaReader; to: SeekTo): SeekedTo		431

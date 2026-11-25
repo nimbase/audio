@@ -1,0 +1,24 @@
+nimTitle	wav	audio/formats/wav.html	module audio/formats/wav		0
+nim	WaveFormatInfo	audio/formats/wav.html#WaveFormatInfo	const WaveFormatInfo		26
+nim	WaveExtensions	audio/formats/wav.html#WaveExtensions	const WaveExtensions		28
+nim	WaveMimeTypes	audio/formats/wav.html#WaveMimeTypes	const WaveMimeTypes		29
+nim	MaxFramesPerPacket	audio/formats/wav.html#MaxFramesPerPacket	const MaxFramesPerPacket		30
+nim	PacketInfo	audio/formats/wav.html#PacketInfo	object PacketInfo		62
+nim	WavReader	audio/formats/wav.html#WavReader	type WavReader		68
+nim	withoutBlocks	audio/formats/wav.html#withoutBlocks,uint32	proc withoutBlocks(frameLen: uint32): PacketInfo		77
+nim	withBlocks	audio/formats/wav.html#withBlocks,uint16,uint64	proc withBlocks(blockSize: uint16; framesPerBlock: uint64): PacketInfo		82
+nim	getNumFramesAt	audio/formats/wav.html#getNumFramesAt,PacketInfo,uint64	proc getNumFramesAt(info: PacketInfo; pos: uint64): uint64		89
+nim	getActualTs	audio/formats/wav.html#getActualTs,PacketInfo,Timestamp	proc getActualTs(info: PacketInfo; ts: Timestamp): Timestamp		92
+nim	mapWaveChannelCount	audio/formats/wav.html#mapWaveChannelCount,int	proc mapWaveChannelCount(n: int): Channels		98
+nim	fixWaveChannelMask	audio/formats/wav.html#fixWaveChannelMask,uint32,int	proc fixWaveChannelMask(mask: uint32; channels: int): uint64		112
+nim	probeWav	audio/formats/wav.html#probeWav,openArray[uint8]	proc probeWav(data: openArray[uint8]): int		136
+nim	openWav	audio/formats/wav.html#openWav,seq[uint8]	proc openWav(data: seq[uint8]): WavReader		363
+nim	trackCount	audio/formats/wav.html#trackCount,WavReader	proc trackCount(w: WavReader): int		460
+nim	mediaInfo	audio/formats/wav.html#mediaInfo,WavReader	proc mediaInfo(w: WavReader): MediaInfo		462
+nim	numFrames	audio/formats/wav.html#numFrames,WavReader	proc numFrames(w: WavReader): Option[uint64]		466
+nim	nextPacket	audio/formats/wav.html#nextPacket,WavReader	proc nextPacket(w: WavReader): Option[Packet]		468
+nim	seek	audio/formats/wav.html#seek,WavReader,SeekTo	proc seek(w: WavReader; to: SeekTo): SeekedTo		484
+nim	adpcmFramesPerBlock	audio/formats/wav.html#adpcmFramesPerBlock,AudioCodecId,int,int	proc adpcmFramesPerBlock(codec: AudioCodecId; blockAlign, nch: int): int		510
+nim	encodeAdpcmData	audio/formats/wav.html#encodeAdpcmData,AudioSamples,AudioCodecId,int	proc encodeAdpcmData(samples: AudioSamples; codec: AudioCodecId; blockAlign: int): seq[\n    uint8]		520
+nim	codecForFormat	audio/formats/wav.html#codecForFormat,SampleFormat	proc codecForFormat(format: SampleFormat): AudioCodecId		557
+nim	encodeWav	audio/formats/wav.html#encodeWav,AudioSamples,uint32	proc encodeWav(samples: AudioSamples; sampleRate: uint32; codec = CodecNull): seq[\n    uint8]		570

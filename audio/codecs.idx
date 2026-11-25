@@ -1,0 +1,75 @@
+nimTitle	codecs	audio/codecs.html	module audio/codecs		0
+nim	AudioCodecId	audio/codecs.html#AudioCodecId	type AudioCodecId		17
+nim	`==`	audio/codecs.html#==,AudioCodecId,AudioCodecId	proc `==`(a, b: AudioCodecId): bool		19
+nim	hash	audio/codecs.html#hash,AudioCodecId	proc hash(id: AudioCodecId): Hash		20
+nim	`$`	audio/codecs.html#$,AudioCodecId	proc `$`(id: AudioCodecId): string		21
+nim	CodecNull	audio/codecs.html#CodecNull	const CodecNull		24
+nim	CodecPcmS32Le	audio/codecs.html#CodecPcmS32Le	const CodecPcmS32Le		26
+nim	CodecPcmS32Be	audio/codecs.html#CodecPcmS32Be	const CodecPcmS32Be		27
+nim	CodecPcmS24Le	audio/codecs.html#CodecPcmS24Le	const CodecPcmS24Le		28
+nim	CodecPcmS24Be	audio/codecs.html#CodecPcmS24Be	const CodecPcmS24Be		29
+nim	CodecPcmS16Le	audio/codecs.html#CodecPcmS16Le	const CodecPcmS16Le		30
+nim	CodecPcmS16Be	audio/codecs.html#CodecPcmS16Be	const CodecPcmS16Be		31
+nim	CodecPcmS8	audio/codecs.html#CodecPcmS8	const CodecPcmS8		32
+nim	CodecPcmU32Le	audio/codecs.html#CodecPcmU32Le	const CodecPcmU32Le		34
+nim	CodecPcmU32Be	audio/codecs.html#CodecPcmU32Be	const CodecPcmU32Be		35
+nim	CodecPcmU24Le	audio/codecs.html#CodecPcmU24Le	const CodecPcmU24Le		36
+nim	CodecPcmU24Be	audio/codecs.html#CodecPcmU24Be	const CodecPcmU24Be		37
+nim	CodecPcmU16Le	audio/codecs.html#CodecPcmU16Le	const CodecPcmU16Le		38
+nim	CodecPcmU16Be	audio/codecs.html#CodecPcmU16Be	const CodecPcmU16Be		39
+nim	CodecPcmU8	audio/codecs.html#CodecPcmU8	const CodecPcmU8		40
+nim	CodecPcmF32Le	audio/codecs.html#CodecPcmF32Le	const CodecPcmF32Le		42
+nim	CodecPcmF32Be	audio/codecs.html#CodecPcmF32Be	const CodecPcmF32Be		43
+nim	CodecPcmF64Le	audio/codecs.html#CodecPcmF64Le	const CodecPcmF64Le		44
+nim	CodecPcmF64Be	audio/codecs.html#CodecPcmF64Be	const CodecPcmF64Be		45
+nim	CodecPcmALaw	audio/codecs.html#CodecPcmALaw	const CodecPcmALaw		47
+nim	CodecPcmMuLaw	audio/codecs.html#CodecPcmMuLaw	const CodecPcmMuLaw		48
+nim	CodecPcmS32LePlanar	audio/codecs.html#CodecPcmS32LePlanar	const CodecPcmS32LePlanar		50
+nim	CodecPcmS32BePlanar	audio/codecs.html#CodecPcmS32BePlanar	const CodecPcmS32BePlanar		51
+nim	CodecPcmS24LePlanar	audio/codecs.html#CodecPcmS24LePlanar	const CodecPcmS24LePlanar		52
+nim	CodecPcmS24BePlanar	audio/codecs.html#CodecPcmS24BePlanar	const CodecPcmS24BePlanar		53
+nim	CodecPcmS16LePlanar	audio/codecs.html#CodecPcmS16LePlanar	const CodecPcmS16LePlanar		54
+nim	CodecPcmS16BePlanar	audio/codecs.html#CodecPcmS16BePlanar	const CodecPcmS16BePlanar		55
+nim	CodecPcmS8Planar	audio/codecs.html#CodecPcmS8Planar	const CodecPcmS8Planar		56
+nim	CodecPcmU32LePlanar	audio/codecs.html#CodecPcmU32LePlanar	const CodecPcmU32LePlanar		57
+nim	CodecPcmU32BePlanar	audio/codecs.html#CodecPcmU32BePlanar	const CodecPcmU32BePlanar		58
+nim	CodecPcmU24LePlanar	audio/codecs.html#CodecPcmU24LePlanar	const CodecPcmU24LePlanar		59
+nim	CodecPcmU24BePlanar	audio/codecs.html#CodecPcmU24BePlanar	const CodecPcmU24BePlanar		60
+nim	CodecPcmU16LePlanar	audio/codecs.html#CodecPcmU16LePlanar	const CodecPcmU16LePlanar		61
+nim	CodecPcmU16BePlanar	audio/codecs.html#CodecPcmU16BePlanar	const CodecPcmU16BePlanar		62
+nim	CodecPcmU8Planar	audio/codecs.html#CodecPcmU8Planar	const CodecPcmU8Planar		63
+nim	CodecPcmF32LePlanar	audio/codecs.html#CodecPcmF32LePlanar	const CodecPcmF32LePlanar		64
+nim	CodecPcmF32BePlanar	audio/codecs.html#CodecPcmF32BePlanar	const CodecPcmF32BePlanar		65
+nim	CodecPcmF64LePlanar	audio/codecs.html#CodecPcmF64LePlanar	const CodecPcmF64LePlanar		66
+nim	CodecPcmF64BePlanar	audio/codecs.html#CodecPcmF64BePlanar	const CodecPcmF64BePlanar		67
+nim	CodecAdpcmG722	audio/codecs.html#CodecAdpcmG722	const CodecAdpcmG722		69
+nim	CodecAdpcmG726	audio/codecs.html#CodecAdpcmG726	const CodecAdpcmG726		70
+nim	CodecAdpcmG726Le	audio/codecs.html#CodecAdpcmG726Le	const CodecAdpcmG726Le		71
+nim	CodecAdpcmMs	audio/codecs.html#CodecAdpcmMs	const CodecAdpcmMs		72
+nim	CodecAdpcmImaWav	audio/codecs.html#CodecAdpcmImaWav	const CodecAdpcmImaWav		73
+nim	CodecAdpcmImaQt	audio/codecs.html#CodecAdpcmImaQt	const CodecAdpcmImaQt		74
+nim	CodecVorbis	audio/codecs.html#CodecVorbis	const CodecVorbis		76
+nim	CodecOpus	audio/codecs.html#CodecOpus	const CodecOpus		77
+nim	CodecMp1	audio/codecs.html#CodecMp1	const CodecMp1		78
+nim	CodecMp2	audio/codecs.html#CodecMp2	const CodecMp2		79
+nim	CodecMp3	audio/codecs.html#CodecMp3	const CodecMp3		80
+nim	CodecAac	audio/codecs.html#CodecAac	const CodecAac		81
+nim	CodecFlac	audio/codecs.html#CodecFlac	const CodecFlac		83
+nim	CodecWavPack	audio/codecs.html#CodecWavPack	const CodecWavPack		84
+nim	CodecAlac	audio/codecs.html#CodecAlac	const CodecAlac		85
+nim	AudioCodecParameters	audio/codecs.html#AudioCodecParameters	object AudioCodecParameters		88
+nim	AudioDecoderOptions	audio/codecs.html#AudioDecoderOptions	object AudioDecoderOptions		100
+nim	FinalizeResult	audio/codecs.html#FinalizeResult	object FinalizeResult		104
+nim	defaultDecoderOptions	audio/codecs.html#defaultDecoderOptions	proc defaultDecoderOptions(): AudioDecoderOptions		107
+nim	forCodec	audio/codecs.html#forCodec,AudioCodecId	proc forCodec(codec: AudioCodecId): AudioCodecParameters		110
+nim	AudioDecoder	audio/codecs.html#AudioDecoder	type AudioDecoder		114
+nim	reset	audio/codecs.html#reset.e,AudioDecoder	method reset(d: AudioDecoder)		117
+nim	codecParams	audio/codecs.html#codecParams.e,AudioDecoder	method codecParams(d: AudioDecoder): AudioCodecParameters		121
+nim	decodePacket	audio/codecs.html#decodePacket.e,AudioDecoder,Packet	method decodePacket(d: AudioDecoder; pkt: Packet): AudioSamples		124
+nim	finalize	audio/codecs.html#finalize.e,AudioDecoder	method finalize(d: AudioDecoder): FinalizeResult		127
+nim	lastDecoded	audio/codecs.html#lastDecoded.e,AudioDecoder	method lastDecoded(d: AudioDecoder): AudioSamples		130
+nim	DecoderFactory	audio/codecs.html#DecoderFactory	type DecoderFactory		134
+nim	audioRegistry	audio/codecs.html#audioRegistry	var audioRegistry		137
+nim	registerAudioDecoder	audio/codecs.html#registerAudioDecoder,AudioCodecId,DecoderFactory	proc registerAudioDecoder(id: AudioCodecId; factory: DecoderFactory)		139
+nim	makeAudioDecoder	audio/codecs.html#makeAudioDecoder,AudioCodecParameters	proc makeAudioDecoder(params: AudioCodecParameters; opts = defaultDecoderOptions()): AudioDecoder		143
+nim	isDecoderRegistered	audio/codecs.html#isDecoderRegistered,AudioCodecId	proc isDecoderRegistered(id: AudioCodecId): bool		149
