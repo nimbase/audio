@@ -27,7 +27,7 @@
 - Planar `AudioBuffer[S]` for all 10 sample formats, LSB-aligned 24-bit,
   `FromSample`-style conversion, gapless `trimStart`/`trimEnd` packets
 - Decoder registry: `registerPcm()`, `registerAdpcm()`, `registerVorbis()`,
-  `registerMpa()`, then `makeAudioDecoder(params)`
+  `registerMpa()`, `registerAac()`, then `makeAudioDecoder(params)`
 
 Codec support (`o` = decode, `w` = encode):
 
@@ -44,6 +44,9 @@ Codec support (`o` = decode, `w` = encode):
 - MP3: o — MPEG-1/2/2.5 Layer 1/2/3 decoder (reservoir, Huffman,
   hybrid synthesis) + raw-stream demuxer (Xing/Info/LAME gapless,
   VBRI, CBR estimate, seek); matches ffmpeg/mpg123 within 2 LSB
+- AAC: o — AAC-LC decoder (Huffman, TNS, KBD/sine IMDCT filterbank)
+  + ISOMP4 demuxer (stbl sample tables, esds ASC, seek); matches
+  ffmpeg within 2 LSB past the 1024-sample priming
 - Checksums: CRC-8/CCITT, CRC-16/ANSI (+LE), CRC-32 (+MPEG-2), MD5
 
 ## Examples
@@ -131,6 +134,29 @@ while true:
   echo samples.framesOf(), " frames"
 ```
 
+### AAC decode (MP4)
+
+```nim
+import std/options
+import audio
+
+registerAac()
+
+let bytes = readFile("fix_aacstereo.m4a").toBytes()
+let reader = openMp4(bytes)              # probeMp4 == 255
+let dec = newAacDecoder(reader.tracks[0].codec,
+  AudioDecoderOptions(gapless: true, verify: false))
+
+while true:
+  let pkt = reader.nextPacket()
+  if pkt.isNone: break
+  let samples = dec.decodePacket(pkt.get) # sfF32 planar, 1024 frames
+  echo samples.framesOf(), " frames"
+```
+Note: like Symphonia, edit lists are parsed but not applied, so the
+first 1024 decoded samples are encoder priming (dark silence to
+discard for gapless playback).
+
 ### Probe + seek
 
 ```nim
@@ -151,7 +177,7 @@ if probeWav(bytes) == 255:
 - [x] FLAC decoder + encoder (CRC/MD5 verify)
 - [x] Ogg demuxer + Vorbis decoder
 - [x] MP1/MP2/MP3 decoders
-- [ ] AAC-LC decoder + ISOMP4 demuxer
+- [x] AAC-LC decoder + ISOMP4 demuxer
 - [ ] ALAC decoder + AIFF/CAF demuxers
 - [ ] Later: WavPack, pure-Nim Opus + HE-AAC ports, MKV/WebM, streaming
   I/O, fuzz corpus, benchmarks

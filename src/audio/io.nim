@@ -445,6 +445,17 @@ proc readLtrVlc*(b: var LtrBitReader; t: VlcTable): tuple[value: uint32,
       b.left -= e.codeLen
       return (e.value, e.codeLen)
 
+proc readLtrUnaryOnes*(b: var LtrBitReader): int =
+  ## Counts leading 1 bits until the first 0 (AAC escape prefix).
+  while b.readLtrBits(1) == 1:
+    inc result
+
+proc realignLtr*(b: var LtrBitReader) =
+  ## Discards cached bits up to the next byte boundary (DSE align).
+  let d = b.left mod 8
+  b.cache = ltrShl(b.cache, d)
+  b.left -= d
+
 # ------------------------------------------------------------ BitWriter ---
 
 type
