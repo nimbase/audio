@@ -296,3 +296,119 @@ suite "mp3 encoder vbr/crc/xing":
       check false
     except AudioError as e:
       check e.kind == ekUnsupported
+    var oi2 = defaultMp3EncoderOptions(128, 44_100,
+      MpaMode(kind: mmJoint, midSide: false, intensity: true, bound: 0))
+    oi2.intensityStart = 21
+    try:
+      discard newMp3Encoder(oi2)
+      check false
+    except AudioError as e:
+      check e.kind == ekUnsupported
+
+suite "mp3 encoder intensity":
+  test "is-only, ms+is and auto+is gapless exact":
+    initMpaTables()
+    let src = sineStereo(22_050, 440.0, 660.0, 0.4)
+    for (name, enc) in [("is", newMp3EncoderJointIs(128, 44_100, 8)),
+        ("ms+is", newMp3EncoderJointMsIs(128, 44_100, 8)),
+        ("auto+is",
+          newMp3EncoderJointAutoIs(128, 44_100, 8))]:
+      enc.enableXingInfo()
+      enc.pushSamplesI16(toS16Interleaved(src))
+      let bytes = enc.finishEncoder()
+      let got = decodeAll(bytes)
+      check got[0].len == 22_050
+      check psnrOf(src, got) > 20.0
+      # Mode extension must carry the intensity bit on every audio frame.
+      var nInt = 0
+      var nTot = 0
+      var off = 0
+      while off + 4 <= bytes.len:
+        if bytes[off] == 0xFF'u8 and (bytes[off + 1] and 0xE0'u8) == 0xE0'u8:
+          let word = (bytes[off].uint32 shl 24) or
+            (bytes[off + 1].uint32 shl 16) or (bytes[off + 2].uint32 shl 8) or
+            bytes[off + 3].uint32
+          try:
+            let h = parseFrameHeader(word)
+            if h.layer == Layer3 and h.frameSize >= 0:
+              if h.channelMode.kind == mmJoint:
+                inc nTot
+                if h.channelMode.intensity:
+                  inc nInt
+              off += 4 + h.frameSize
+              continue
+          except AudioError:
+            discard
+        inc off
+      check nTot > 0
+      check nInt == nTot
+      discard name
+  test "intensity all rates gapless exact":
+    initMpaTables()
+    for (rate, kbps) in [(44100, 128), (48000, 128), (32000, 128),
+        (22050, 64), (24000, 64), (16000, 48), (12000, 32),
+        (11025, 32), (8000, 24)]:
+      let src = sineStereo(11_520, 440.0, 660.0, 0.4, rate)
+      var o = gaplessOpts(kbps, rate.uint32,
+        MpaMode(kind: mmJoint, midSide: false, intensity: true, bound: 0))
+      o.intensityStart = 8
+      let got = decodeAll(encodeMp3Stream(src, o))
+      check got[0].len == 11_520
+      check psnrOf(src, got) > 15.0
+  test "intensity short and mixed gapless exact":
+    initMpaTables()
+    let src = sineStereo(11_520, 440.0, 660.0, 0.4)
+    var os = gaplessOpts(128, 44_100,
+      MpaMode(kind: mmJoint, midSide: false, intensity: true, bound: 0))
+    os.intensityStart = 8
+    os.forceShort = true
+    let gs = decodeAll(encodeMp3Stream(src, os))
+    check gs[0].len == 11_520
+    check psnrOf(src, gs) > 15.0
+    var om = gaplessOpts(128, 44_100,
+      MpaMode(kind: mmJoint, midSide: false, intensity: true, bound: 0))
+    om.intensityStart = 8
+    om.forceMixed = true
+    let gm = decodeAll(encodeMp3Stream(src, om))
+    check gm[0].len == 11_520
+    check psnrOf(src, gm) > 15.0
+  test "intensity lsf, vbr and crc":
+    initMpaTables()
+    let src = sineStereo(11_025, 440.0, 660.0, 0.4, 22050)
+    let e = newMp3EncoderJointIs(64, 22_050, 8)
+    e.enableXingInfo()
+    e.pushSamplesI16(toS16Interleaved(src))
+    let got = decodeAll(e.finishEncoder())
+    check got[0].len == 11_025
+    check psnrOf(src, got) > 15.0
+    let src2 = sineStereo(22_050, 440.0, 660.0, 0.4)
+    var ov = gaplessOpts(128, 44_100,
+      MpaMode(kind: mmJoint, midSide: false, intensity: true, bound: 0))
+    ov.intensityStart = 8
+    ov.vbr = true
+    ov.vbrMinKbps = 96
+    ov.vbrMaxKbps = 192
+    let gv = decodeAll(encodeMp3Stream(src2, ov))
+    check gv[0].len == 22_050
+    check psnrOf(src2, gv) > 15.0
+    var oc = gaplessOpts(128, 44_100,
+      MpaMode(kind: mmJoint, midSide: true, intensity: true, bound: 0))
+    oc.intensityStart = 8
+    oc.jointMs = true
+    oc.crc = true
+    let gc = decodeAll(encodeMp3Stream(src2, oc))
+    check gc[0].len == 22_050
+    check psnrOf(src2, gc) > 15.0
+  test "intensity outer loop short/mixed gapless exact":
+    initMpaTables()
+    let src = sineStereo(22_050, 440.0, 660.0, 0.4)
+    for (forceS, forceM) in [(false, false), (true, false), (false, true)]:
+      var o = gaplessOpts(128, 44_100,
+        MpaMode(kind: mmJoint, midSide: false, intensity: true, bound: 0))
+      o.intensityStart = 8
+      o.useOuterLoop = true
+      o.forceShort = forceS
+      o.forceMixed = forceM
+      let got = decodeAll(encodeMp3Stream(src, o))
+      check got[0].len == 22_050
+      check psnrOf(src, got) > 15.0

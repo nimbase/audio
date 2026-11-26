@@ -1211,16 +1211,30 @@ proc requantizeApprox*(q: array[576, int32]; ch: GranuleChannel;
     inc bi
   discard mult
 
+proc outerPart2Cost*(bt: BlockType; lsf: bool): int {.inline.} =
+  ## Part2 (scalefactor) bits reserved by the outer loop for `sfc = 15`
+  ## (MPEG-1) / `399` (LSF): long 74, pure-short 126, mixed 122
+  ## (MPEG-1) / 114 (LSF, partition 6/9/9/9).
+  if bt.kind == btShort:
+    if bt.mixed:
+      if lsf: 114 else: 122
+    else:
+      126
+  else:
+    74
+
 proc outerLoopSearchLong*(xr: array[576, float32]; ch: var GranuleChannel;
     sampleRateHz: uint32; version: MpegVersion; budget: int;
     xminBands: array[21, float64];
     maxIter = 64): tuple[ok: bool, `is`: array[576, int32]] =
   ## §C.1.5.4.3 long-block distortion loop (uniform threshold).
   let idx = sampleRateIdxOf(sampleRateHz, version)
-  # Reserve part2 (scalefactor) bits: 11*4 + 10*3 = 74 for long blocks
-  # under scalefac_compress = 15.
-  let innerBudget = max(budget - 74, 64)
-  ch.scalefacCompress = Mp3OuterSfacCompress
+  let lsf = version != Mpeg1
+  # Reserve part2 (scalefactor) bits per block type under the outer
+  # scalefac_compress (15 MPEG-1 / 399 LSF).
+  let innerBudget = max(budget - outerPart2Cost(ch.blockType, lsf), 64)
+  ch.scalefacCompress = if lsf: Mp3OuterSfacCompressLsf
+    else: Mp3OuterSfacCompress
   for i in 0 ..< 21:
     ch.scalefacs[i] = 0
   ch.preflag = false
@@ -1312,6 +1326,161 @@ proc msMatrixForward*(l, r: array[576, float32]): tuple[m, s: array[576,
   for i in 0 ..< 576:
     result.m[i] = (l[i] + r[i]) * k
     result.s[i] = (l[i] - r[i]) * k
+
+const
+  Mp3IntensityIllegal* = 7
+  Mp3IntensitySfcLsf* = 258
+  Mp3MixedFirstShortSfb* = 3
+  Mp3MixedLastLongSfb* = 7
+
+proc deriveIntensityPos*(lEnergy, rEnergy: float64): int =
+  ## Annex G.2 c): NINT((12/pi)*atan(sqrt(EL/ER))), 0..6, 7 illegal never.
+  if rEnergy <= 0.0:
+    return 6
+  let ratio = sqrt(lEnergy / rEnergy)
+  let pos = round(arctan(ratio) * 12.0 / PI)
+  clamp(pos.int, 0, 6)
+
+proc deriveIntensityPosLsf*(lEnergy, rEnergy: float64): int =
+  ## §13818-3 power-law grid, closest in log space, 0..6.
+  const A = 0.17328679513998632 # ln(2)*0.25
+  if rEnergy <= 0.0:
+    return 6
+  if lEnergy <= 0.0:
+    return 5
+  let target = ln(lEnergy / rEnergy) / (2.0 * A)
+  const grid = [0.0, -1.0, 1.0, -2.0, 2.0, -3.0, 3.0]
+  var best = 0
+  var bestErr = Inf
+  for p, g in grid.pairs:
+    let err = abs(g - target)
+    if err < bestErr:
+      bestErr = err
+      best = p
+  best
+
+proc intensityShortStart*(longStarts: array[22, int];
+    shortStarts: array[13, int]; startSfb: int): int =
+  ## Map long-bound line onto a short start band (first short band at/after
+  ## the long line, defaulting to the last band so a short granule always
+  ## couples something).
+  let line = longStarts[startSfb]
+  for sfb in 0 ..< 12:
+    if shortStarts[sfb] >= line:
+      return sfb
+  11
+
+proc coupleIntensityLong*(left, right: var array[576, float32];
+    starts: array[22, int]; startSfb: int; lsf: bool): array[21, int] =
+  ## Couple long bands startSfb..20: left += right, right = 0, positions out.
+  for i in 0 ..< 21:
+    result[i] = Mp3IntensityIllegal
+  for sfb in startSfb ..< 21:
+    let lo = starts[sfb]
+    let hi = starts[sfb + 1]
+    var le, re = 0.0
+    for i in lo ..< hi:
+      le += left[i].float64 * left[i].float64
+      re += right[i].float64 * right[i].float64
+    result[sfb] = if lsf: deriveIntensityPosLsf(le, re)
+      else: deriveIntensityPos(le, re)
+    for i in lo ..< hi:
+      left[i] += right[i]
+      right[i] = 0.0
+  for i in starts[21] ..< 576:
+    left[i] += right[i]
+    right[i] = 0.0
+
+proc coupleIntensityShort*(left, right: var array[576, float32];
+    shortStarts: array[13, int]; longStarts: array[22, int]; startSfb: int;
+    lsf: bool): tuple[pos: array[12, array[3, int]], shortStart: int] =
+  ## Per-window short coupling over shortStart..12 (native interleaved layout).
+  for sfb in 0 ..< 12:
+    for w in 0 ..< 3:
+      result.pos[sfb][w] = Mp3IntensityIllegal
+  let ss = intensityShortStart(longStarts, shortStarts, startSfb)
+  result.shortStart = ss
+  for sfb in ss ..< 12:
+    let s = shortStarts[sfb]
+    let w = if sfb + 1 < 13: shortStarts[sfb + 1] - s else: 192 - s
+    let base = 3 * s
+    for win in 0 ..< 3:
+      var le, re = 0.0
+      let wb = base + win * w
+      for k in 0 ..< w:
+        let i = wb + k
+        if i < 576:
+          le += left[i].float64 * left[i].float64
+          re += right[i].float64 * right[i].float64
+      result.pos[sfb][win] = if lsf: deriveIntensityPosLsf(le, re)
+        else: deriveIntensityPos(le, re)
+      for k in 0 ..< w:
+        let i = wb + k
+        if i < 576:
+          left[i] += right[i]
+          right[i] = 0.0
+  if ss < 12:
+    for i in 3 * shortStarts[12] ..< 576:
+      left[i] += right[i]
+      right[i] = 0.0
+
+proc coupleIntensityMixed*(left, right: var array[576, float32];
+    shortStarts: array[13, int]; longStarts: array[22, int]; startSfb: int;
+    lsf: bool): tuple[longPos: array[21, int],
+    shortPos: array[12, array[3, int]], shortStart: int] =
+  ## §2.4.3.4.10.3 two-region carve-out: long bands start..8 plus short
+  ## bands shortStart..12 per window.
+  for i in 0 ..< 21:
+    result.longPos[i] = Mp3IntensityIllegal
+  for sfb in 0 ..< 12:
+    for w in 0 ..< 3:
+      result.shortPos[sfb][w] = Mp3IntensityIllegal
+  let longEnd = Mp3MixedLastLongSfb + 1
+  for sfb in startSfb ..< longEnd:
+    if sfb < 0 or sfb >= 21:
+      continue
+    let lo = longStarts[sfb]
+    let hi = longStarts[sfb + 1]
+    var le, re = 0.0
+    for i in lo ..< hi:
+      le += left[i].float64 * left[i].float64
+      re += right[i].float64 * right[i].float64
+    result.longPos[sfb] = if lsf: deriveIntensityPosLsf(le, re)
+      else: deriveIntensityPos(le, re)
+    for i in lo ..< hi:
+      left[i] += right[i]
+      right[i] = 0.0
+  let line = longStarts[startSfb]
+  var mapped = 11
+  for sfb in 0 ..< 12:
+    if shortStarts[sfb] >= line:
+      mapped = sfb
+      break
+  let ss = max(mapped, Mp3MixedFirstShortSfb)
+  result.shortStart = ss
+  for sfb in ss ..< 12:
+    let s = shortStarts[sfb]
+    let w = if sfb + 1 < 13: shortStarts[sfb + 1] - s else: 192 - s
+    let base = 3 * s
+    for win in 0 ..< 3:
+      var le, re = 0.0
+      let wb = base + win * w
+      for k in 0 ..< w:
+        let i = wb + k
+        if i < 576:
+          le += left[i].float64 * left[i].float64
+          re += right[i].float64 * right[i].float64
+      result.shortPos[sfb][win] = if lsf: deriveIntensityPosLsf(le, re)
+        else: deriveIntensityPos(le, re)
+      for k in 0 ..< w:
+        let i = wb + k
+        if i < 576:
+          left[i] += right[i]
+          right[i] = 0.0
+  if ss < 12:
+    for i in 3 * shortStarts[12] ..< 576:
+      left[i] += right[i]
+      right[i] = 0.0
 
 # -------------------------------------------------- block decisions ---
 
@@ -1664,16 +1833,19 @@ proc newMp3Encoder*(opts: Mp3EncoderOptions): Mp3Encoder =
     raise unsupportedError("mp3enc: bitrate not on Layer III ladder")
   let nch = opts.mode.numChannels()
   if opts.mode.kind == mmJoint and not opts.jointMs and
-      not opts.jointAuto:
+      not opts.jointAuto and opts.intensityStart == 0:
     raise unsupportedError(
       "mp3enc: joint stereo needs jointMs or jointAuto")
+  if opts.intensityStart != 0:
+    if nch != 2 or opts.mode.kind != mmJoint:
+      raise unsupportedError("mp3enc: intensity needs joint stereo")
+    if opts.intensityStart < 1 or opts.intensityStart > 20:
+      raise unsupportedError("mp3enc: intensityStart must be 1..20")
   if opts.vbr:
     let lo = layer3BitrateIndex(v, opts.vbrMinKbps.uint32)
     let hi = layer3BitrateIndex(v, opts.vbrMaxKbps.uint32)
     if lo.isNone or hi.isNone or lo.get > hi.get:
       raise unsupportedError("mp3enc: malformed VBR config")
-  if opts.intensityStart != 0:
-    raise unsupportedError("mp3enc: intensity stereo is a follow-up")
   let lsf = v != Mpeg1
   Mp3Encoder(sampleRateHz: opts.sampleRateHz, version: v, nch: nch,
     mode: opts.mode, bitrateKbps: opts.bitrateKbps, bitrateIdx: bi.get,
@@ -1856,7 +2028,10 @@ proc assembleFrame*(e: Mp3Encoder; perChPcm: openArray[seq[float32]];
       else:
         btPerGc[gr][ch] = mbLong
   # Joint-stereo agreement: mirror channel 0 across both channels.
-  if e.nch == 2 and (e.opts.jointMs or e.opts.jointAuto):
+  let intensityActive = e.opts.intensityStart != 0 and e.nch == 2
+  let startSfb = e.opts.intensityStart
+  if e.nch == 2 and (e.opts.jointMs or e.opts.jointAuto or
+      intensityActive):
     for gr in 0 ..< ngr:
       btPerGc[gr][1] = btPerGc[gr][0]
       mixedPerGc[gr][1] = mixedPerGc[gr][0]
@@ -1870,6 +2045,53 @@ proc assembleFrame*(e: Mp3Encoder; perChPcm: openArray[seq[float32]];
       xrPre[gr][ch] = e.granuleXrDispatch(ch,
         perChPcm[ch].toOpenArray(base, base + 575), btPerGc[gr][ch],
         mixedPerGc[gr][ch])
+  # Pass 1.45: §2.4.3.4.9.3 intensity coupling (L+R magnitude, R zero-part).
+  var isLongPos: array[2, array[21, int]]
+  var isShortPos: array[2, array[12, array[3, int]]]
+  var isMixedLong: array[2, array[21, int]]
+  var isMixedShort: array[2, array[12, array[3, int]]]
+  var shortStartPerGr: array[2, int]
+  var isShortGr: array[2, bool]
+  var isMixedGr: array[2, bool]
+  var intensityCoupled: array[2, bool]
+  for gr in 0 ..< 2:
+    for i in 0 ..< 21:
+      isLongPos[gr][i] = Mp3IntensityIllegal
+      isMixedLong[gr][i] = Mp3IntensityIllegal
+    for sfb in 0 ..< 12:
+      for w in 0 ..< 3:
+        isShortPos[gr][sfb][w] = Mp3IntensityIllegal
+        isMixedShort[gr][sfb][w] = Mp3IntensityIllegal
+    shortStartPerGr[gr] = 12
+  let longStartsAll = longBandStarts(e.sampleRateHz, e.version)
+  let shortStartsAll = shortBandStarts(e.sampleRateHz, e.version)
+  if intensityActive:
+    for gr in 0 ..< ngr:
+      let bt = btPerGc[gr][0]
+      let mixed = mixedPerGc[gr][0]
+      if mixed and e.lsf:
+        # LSF mixed partition (33 slots) differs from the MPEG-1 two-region
+        # carve-out; keep full stereo so the decoder bound lands at 21.
+        intensityCoupled[gr] = false
+      elif mixed:
+        let r = coupleIntensityMixed(xrPre[gr][0], xrPre[gr][1],
+          shortStartsAll, longStartsAll, startSfb, e.lsf)
+        isMixedLong[gr] = r.longPos
+        isMixedShort[gr] = r.shortPos
+        shortStartPerGr[gr] = r.shortStart
+        isMixedGr[gr] = true
+        intensityCoupled[gr] = true
+      elif bt == mbShort:
+        let r = coupleIntensityShort(xrPre[gr][0], xrPre[gr][1],
+          shortStartsAll, longStartsAll, startSfb, e.lsf)
+        isShortPos[gr] = r.pos
+        shortStartPerGr[gr] = r.shortStart
+        isShortGr[gr] = true
+        intensityCoupled[gr] = r.shortStart < 12
+      else:
+        isLongPos[gr] = coupleIntensityLong(xrPre[gr][0], xrPre[gr][1],
+          longStartsAll, startSfb, e.lsf)
+        intensityCoupled[gr] = startSfb < 21
   # Pass 2: MS decision + quantization + side info.
   var si = FrameData(mainDataBegin: 0)
   var scfsi: array[2, array[4, bool]]
@@ -1878,20 +2100,44 @@ proc assembleFrame*(e: Mp3Encoder; perChPcm: openArray[seq[float32]];
   if e.opts.jointMs:
     frameMs = true
   elif e.opts.jointAuto and e.nch == 2:
-    # Per-frame picker (mode_extension is frame-scoped): total S energy
-    # over all granules vs total L+R energy.
-    var eL, eR, eS = 0.0'f32
+    # Per-frame picker over the below-bound region only (§2.4.3.4.9.1: MS
+    # applies below the intensity bound). Frame-scoped mode_extension.
+    var eLR, eSide2 = 0.0
     for gr in 0 ..< ngr:
-      for i in 0 ..< 576:
-        eL += xrPre[gr][0][i] * xrPre[gr][0][i]
-        eR += xrPre[gr][1][i] * xrPre[gr][1][i]
-      let m = msMatrixForward(xrPre[gr][0], xrPre[gr][1])
-      for i in 0 ..< 576:
-        eS += m.s[i] * m.s[i]
-    frameMs = eS / max(eL + eR, 1e-30) <=
-      e.opts.jointAutoThreshold.float32
+      var hi = 576
+      if intensityActive and intensityCoupled[gr]:
+        if isShortGr[gr] or isMixedGr[gr]:
+          hi = min(3 * shortStartsAll[shortStartPerGr[gr]], 576)
+        else:
+          hi = min(longStartsAll[startSfb], 576)
+      for i in 0 ..< hi:
+        let l = xrPre[gr][0][i].float64
+        let r = xrPre[gr][1][i].float64
+        eLR += l * l + r * r
+        let d = l - r
+        eSide2 += d * d
+    if eLR <= 0.0:
+      frameMs = true
+    else:
+      frameMs = eSide2 / (2.0 * eLR) <= e.opts.jointAutoThreshold
+  if intensityActive and frameMs:
+    # §2.4.3.4.9.2 rotation below the bound only (intensity zero-part above
+    # stays coupled). Non-intensity frames keep the whole-spectrum matrix
+    # inside encodeGranuleStereo.
+    const k = 0.7071067811865476'f32
+    for gr in 0 ..< ngr:
+      var hi = 576
+      if intensityCoupled[gr]:
+        if isShortGr[gr] or isMixedGr[gr]:
+          hi = min(3 * shortStartsAll[shortStartPerGr[gr]], 576)
+        else:
+          hi = min(longStartsAll[startSfb], 576)
+      for i in 0 ..< hi:
+        let l = xrPre[gr][0][i]
+        let r = xrPre[gr][1][i]
+        xrPre[gr][0][i] = (l + r) * k
+        xrPre[gr][1][i] = (l - r) * k
   for gr in 0 ..< ngr:
-    let useMs = frameMs
     if e.nch == 1:
       var c0 = defaultGranuleChannel()
       if btPerGc[gr][0] == mbShort:
@@ -1907,6 +2153,8 @@ proc assembleFrame*(e: Mp3Encoder; perChPcm: openArray[seq[float32]];
         let o = outerLoopSearchLong(xrPre[gr][0], c0, e.sampleRateHz,
           e.version, budget, e.outerXminBands())
         q = o.`is`
+        if e.lsf:
+          c0.scalefacCompress = Mp3OuterSfacCompressLsf
       else:
         let s = searchBitBudgetBanded(xrPre[gr][0], c0, e.sampleRateHz,
           e.version, budget)
@@ -1920,9 +2168,133 @@ proc assembleFrame*(e: Mp3Encoder; perChPcm: openArray[seq[float32]];
       si.granules[gr][0] = c0
       gcData[gr][0] = Mp3GcData(`is`: q, bigPairs: bp, count1Quads: qq,
         useB: useB, r0: c0.region1Start, r1: c0.region2Start)
-    else:
-      let (q0, q1, c0, c1) = e.encodeGranuleStereo(gr, xrPre[gr][0],
-        xrPre[gr][1], btPerGc[gr][0], mixedPerGc[gr][0], useMs)
+    elif intensityActive and intensityCoupled[gr]:
+      # Intensity granule: MS already applied, quantize L/R plain then wire
+      # positions into the right channel scalefactors.
+      var c0 = defaultGranuleChannel()
+      var c1 = defaultGranuleChannel()
+      if btPerGc[gr][0] == mbShort:
+        c0.blockType = BlockType(kind: btShort, mixed: mixedPerGc[gr][0])
+        c1.blockType = BlockType(kind: btShort, mixed: mixedPerGc[gr][0])
+      elif btPerGc[gr][0] == mbStart:
+        c0.blockType = BlockType(kind: btStart)
+        c1.blockType = BlockType(kind: btStart)
+      elif btPerGc[gr][0] == mbEnd:
+        c0.blockType = BlockType(kind: btEnd)
+        c1.blockType = BlockType(kind: btEnd)
+      let budget = e.perGcBitBudget()
+      var q0, q1: array[576, int32]
+      if e.opts.useOuterLoop:
+        let xb = e.outerXminBands()
+        let o0 = outerLoopSearchLong(xrPre[gr][0], c0, e.sampleRateHz,
+          e.version, budget, xb)
+        let o1 = outerLoopSearchLong(xrPre[gr][1], c1, e.sampleRateHz,
+          e.version, budget, xb)
+        q0 = o0.`is`
+        q1 = o1.`is`
+        if e.lsf:
+          c0.scalefacCompress = Mp3OuterSfacCompressLsf
+          c1.scalefacCompress = Mp3IntensitySfcLsf
+        else:
+          c1.scalefacCompress = Mp3OuterSfacCompress
+      else:
+        let isShortBt = btPerGc[gr][0] == mbShort and
+          not mixedPerGc[gr][0]
+        let isMixedBt = mixedPerGc[gr][0]
+        let part2Right =
+          if isMixedBt: 122
+          elif isShortBt: 126
+          else: (if e.lsf: 63 else: 74)
+        let s0 = searchBitBudgetBanded(xrPre[gr][0], c0, e.sampleRateHz,
+          e.version, budget)
+        let rightBudget = max(budget - part2Right, 16)
+        let s1 = searchBitBudgetBanded(xrPre[gr][1], c1, e.sampleRateHz,
+          e.version, rightBudget)
+        if not s0.ok or not s1.ok:
+          raise unsupportedError(
+            "mp3enc: frame does not fit slot (raise bitrate)")
+        q0 = s0.`is`
+        q1 = s1.`is`
+        if e.lsf:
+          c1.scalefacCompress = Mp3IntensitySfcLsf
+        else:
+          c1.scalefacCompress = Mp3OuterSfacCompress
+      # Right-channel wire-up: coupled bands carry is_pos, the all-zero tail
+      # below the bound carries the illegal marker 7 (decode-side bound is
+      # one past the last non-zero right line).
+      let idx = sampleRateIdxOf(e.sampleRateHz, e.version)
+      if isMixedGr[gr]:
+        let longEnd = Mp3MixedLastLongSfb + 1
+        var lastLong = -1
+        for i in 0 ..< min(longStartsAll[longEnd], 576):
+          if q1[i] != 0:
+            lastLong = i
+        var zLong = 0
+        if lastLong >= 0:
+          zLong = longEnd
+          for sfb in 0 ..< longEnd:
+            if lastLong < longStartsAll[sfb + 1]:
+              zLong = sfb + 1
+              break
+        for sfb in zLong ..< min(startSfb, longEnd):
+          c1.scalefacs[sfb] = Mp3IntensityIllegal
+        for sfb in min(startSfb, longEnd) ..< longEnd:
+          if startSfb < longEnd:
+            c1.scalefacs[sfb] = isMixedLong[gr][sfb]
+        let sw = SfbMixedSwitchPoint[idx]
+        let ss = shortStartPerGr[gr]
+        for win in 0 ..< 3:
+          var lastSfb = -1
+          for sfb in Mp3MixedFirstShortSfb ..< 12:
+            let s = shortStartsAll[sfb]
+            let w = if sfb + 1 < 13: shortStartsAll[sfb + 1] - s
+              else: 192 - s
+            let wb = 3 * s + win * w
+            for k in 0 ..< w:
+              let i = wb + k
+              if i < 576 and q1[i] != 0:
+                lastSfb = sfb
+          let zFrom = if lastSfb < 0: Mp3MixedFirstShortSfb else: lastSfb + 1
+          for sfb in zFrom ..< min(ss, 12):
+            c1.scalefacs[sw + (sfb - Mp3MixedFirstShortSfb) * 3 + win] =
+              Mp3IntensityIllegal
+          for sfb in ss ..< 12:
+            c1.scalefacs[sw + (sfb - Mp3MixedFirstShortSfb) * 3 + win] =
+              isMixedShort[gr][sfb][win]
+      elif isShortGr[gr]:
+        let ss = shortStartPerGr[gr]
+        for win in 0 ..< 3:
+          var lastSfb = -1
+          for sfb in 0 ..< 12:
+            let s = shortStartsAll[sfb]
+            let w = if sfb + 1 < 13: shortStartsAll[sfb + 1] - s
+              else: 192 - s
+            let wb = 3 * s + win * w
+            for k in 0 ..< w:
+              let i = wb + k
+              if i < 576 and q1[i] != 0:
+                lastSfb = sfb
+          let zFrom = if lastSfb < 0: 0 else: lastSfb + 1
+          for sfb in zFrom ..< min(ss, 12):
+            c1.scalefacs[sfb * 3 + win] = Mp3IntensityIllegal
+          for sfb in ss ..< 12:
+            c1.scalefacs[sfb * 3 + win] = isShortPos[gr][sfb][win]
+      else:
+        var last = -1
+        for i in 0 ..< 576:
+          if q1[i] != 0:
+            last = i
+        var zFrom = 0
+        if last >= 0:
+          zFrom = 21
+          for sfb in 0 ..< 21:
+            if last < longStartsAll[sfb + 1]:
+              zFrom = sfb + 1
+              break
+        for sfb in zFrom ..< min(startSfb, 21):
+          c1.scalefacs[sfb] = Mp3IntensityIllegal
+        for sfb in startSfb ..< 21:
+          c1.scalefacs[sfb] = isLongPos[gr][sfb]
       si.granules[gr][0] = c0
       si.granules[gr][1] = c1
       let qs = [q0, q1]
@@ -1934,10 +2306,34 @@ proc assembleFrame*(e: Mp3Encoder; perChPcm: openArray[seq[float32]];
           count1Quads: qq, useB: si.granules[gr][ci].count1Select == 1,
           r0: si.granules[gr][ci].region1Start,
           r1: si.granules[gr][ci].region2Start)
+    else:
+      let useMsNow = frameMs and not intensityActive
+      let (q0, q1, c0, c1) = e.encodeGranuleStereo(gr, xrPre[gr][0],
+        xrPre[gr][1], btPerGc[gr][0], mixedPerGc[gr][0], useMsNow)
+      var cc0 = c0
+      var cc1 = c1
+      if e.lsf and e.opts.useOuterLoop:
+        cc0.scalefacCompress = Mp3OuterSfacCompressLsf
+        cc1.scalefacCompress = Mp3OuterSfacCompressLsf
+      si.granules[gr][0] = cc0
+      si.granules[gr][1] = cc1
+      let qs = [q0, q1]
+      for ci in 0 ..< 2:
+        let q = qs[ci]
+        let (bp, qq) = partitionSplit(q)
+        si.granules[gr][ci].bigValues = bp
+        gcData[gr][ci] = Mp3GcData(`is`: q, bigPairs: bp,
+          count1Quads: qq, useB: si.granules[gr][ci].count1Select == 1,
+          r0: si.granules[gr][ci].region1Start,
+          r1: si.granules[gr][ci].region2Start)
+  var frameMode = e.mode
+  if frameMode.kind == mmJoint:
+    frameMode.midSide = frameMs
+    frameMode.intensity = intensityActive
   let assembly = assembleMainData(
     FrameHeader(version: e.version, layer: Layer3,
       bitrate: e.bitrateKbps.uint32 * 1000, sampleRate: e.sampleRateHz,
-      sampleRateIdx: sampleRateIdxOf(e.sampleRateHz), channelMode: e.mode,
+      sampleRateIdx: sampleRateIdxOf(e.sampleRateHz), channelMode: frameMode,
       hasCrc: false, frameSize: 0),
     si, scfsi, gcData)
   e.frames.add(Mp3PendingFrame(sideInfo: si, scfsi: scfsi,
@@ -1946,6 +2342,7 @@ proc assembleFrame*(e: Mp3Encoder; perChPcm: openArray[seq[float32]];
   var md = e.mode
   if md.kind == mmJoint:
     md.midSide = frameMs
+    md.intensity = intensityActive
   e.frameModeExt.add(md)
 
 proc frameLenFor*(version: MpegVersion; bitrateKbps: int;
@@ -2136,6 +2533,36 @@ proc newMp3EncoderJointAuto*(bitrateKbps: int; sampleRateHz: uint32;
     MpaMode(kind: mmJoint, midSide: true, intensity: false, bound: 0))
   o.jointAuto = true
   o.jointAutoThreshold = threshold
+  newMp3Encoder(o)
+
+proc newMp3EncoderJointIs*(bitrateKbps: int; sampleRateHz: uint32;
+    startSfb = 8): Mp3Encoder =
+  ## Intensity-only (`mode_extension '01'`): bands at/above `startSfb`
+  ## (1..20) transmit is_pos, right zero-part above the bound.
+  var o = defaultMp3EncoderOptions(bitrateKbps, sampleRateHz,
+    MpaMode(kind: mmJoint, midSide: false, intensity: true, bound: 0))
+  o.intensityStart = startSfb
+  newMp3Encoder(o)
+
+proc newMp3EncoderJointMsIs*(bitrateKbps: int; sampleRateHz: uint32;
+    startSfb = 8): Mp3Encoder =
+  ## MS+intensity (`mode_extension '11'`): MS below the bound, intensity
+  ## above it.
+  var o = defaultMp3EncoderOptions(bitrateKbps, sampleRateHz,
+    MpaMode(kind: mmJoint, midSide: true, intensity: true, bound: 0))
+  o.jointMs = true
+  o.intensityStart = startSfb
+  newMp3Encoder(o)
+
+proc newMp3EncoderJointAutoIs*(bitrateKbps: int; sampleRateHz: uint32;
+    startSfb = 8; threshold = 0.5): Mp3Encoder =
+  ## Auto-MS + intensity: per-frame MS picker below the bound, intensity
+  ## above it (`'11'` when MS fires, `'01'` otherwise).
+  var o = defaultMp3EncoderOptions(bitrateKbps, sampleRateHz,
+    MpaMode(kind: mmJoint, midSide: true, intensity: true, bound: 0))
+  o.jointAuto = true
+  o.jointAutoThreshold = threshold
+  o.intensityStart = startSfb
   newMp3Encoder(o)
 
 proc enableAutoBlockType*(e: Mp3Encoder; threshold = 10.0;

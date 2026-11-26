@@ -51,7 +51,8 @@ Codec support (`o` = decode, `w` = encode):
   Layer III encoder: analysis filterbank, forward MDCT, quantizer,
   inner-loop gain search, outer distortion loop, Huffman emit,
   reservoir scheduler, stereo/MS-joint (incl. auto picker),
-  short/mixed blocks (forced + signal-driven auto), threshold-in-quiet
+  intensity-stereo (is-only, MS+IS, auto+IS; long/short/mixed,
+  MPEG-1/LSF), short/mixed blocks (forced + signal-driven auto), threshold-in-quiet
   + quality presets, CBR/VBR, Xing/Info + LAME gapless tag, CRC-16,
   all nine sample rates; decoded output verified sample-exact
   (gapless) and within black-box tolerance on fixtures
@@ -303,7 +304,8 @@ if probeWav(bytes) == 255:
 - [x] MP1/MP2/MP3 decoders
 - [x] MP3 (Layer III) encoder: framing, analysis filterbank, MDCT,
   quantizer, inner/outer loops, Huffman emit, reservoir, MS-joint,
-  short/mixed blocks, VBR, Xing/Info, CRC, all MPEG rates
+  intensity-stereo (is-only/MS+IS/auto+IS, long/short/mixed,
+  MPEG-1/LSF), short/mixed blocks, VBR, Xing/Info, CRC, all MPEG rates
 - [x] AAC-LC decoder + ISOMP4 demuxer
 - [x] ALAC decoder + AIFF/CAF demuxers
 - [x] MKV/WebM demuxer (Vorbis/FLAC/MP3/AAC/ALAC/PCM decode, Opus demux-only)
