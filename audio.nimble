@@ -10,3 +10,4 @@ srcDir        = "src"
 # Dependencies
 
 requires "nim >= 2.4.0"
+requires "buffalo >= 0.1.0"

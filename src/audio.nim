@@ -9,6 +9,7 @@ import ./audio/audio
 import ./audio/io
 import ./audio/checksum
 import ./audio/packet
+import ./audio/source
 import ./audio/codecs
 import ./audio/metadata
 import ./audio/formats
@@ -35,6 +36,7 @@ export audio
 export io
 export checksum
 export packet
+export source
 export codecs
 export metadata
 export formats

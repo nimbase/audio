@@ -166,6 +166,167 @@ proc fourCcToStr*(tag: array[4, uint8]): string =
   for i in 0 ..< 4:
     result[i] = tag[i].char
 
+# ---------------------------------------------------------- ViewReader ---
+
+type
+  ViewReader* = object
+    ## Cursor over borrowed bytes (mmap view, packet window). Same primitive
+    ## set as `Reader` but zero-copy: never owns or copies the backing.
+    ## The backing (e.g. `MappedSource`) must outlive every view.
+    base*: ptr UncheckedArray[uint8]
+    len*: int
+    pos*: int
+
+proc getPos*(r: Reader): int {.inline.} = r.pos
+proc setPos*(r: var Reader; p: int) {.inline.} = r.pos = p
+proc bufLen*(r: Reader): int {.inline.} = r.data.len
+
+proc getPos*(v: ViewReader): int {.inline.} = v.pos
+proc setPos*(v: var ViewReader; p: int) {.inline.} = v.pos = p
+proc bufLen*(v: ViewReader): int {.inline.} = v.len
+
+proc len*(v: ViewReader): int {.inline.} = v.len
+proc remaining*(v: ViewReader): int {.inline.} = v.len - v.pos
+proc isEmpty*(v: ViewReader): bool {.inline.} = v.pos >= v.len
+
+proc need(v: ViewReader; n: int) {.inline.} =
+  if v.pos + n > v.len:
+    raise decodeError("buffer underrun")
+
+proc readByte*(v: var ViewReader): uint8 {.inline.} =
+  v.need(1)
+  result = v.base[v.pos]
+  inc v.pos
+
+proc peekU32Le*(r: Reader): uint32 {.inline.} =
+  ## Four bytes at the cursor as LE u32, without advancing.
+  r.need(4)
+  r.data[r.pos].uint32 or (r.data[r.pos + 1].uint32 shl 8) or
+    (r.data[r.pos + 2].uint32 shl 16) or (r.data[r.pos + 3].uint32 shl 24)
+
+proc peekU32Le*(v: ViewReader): uint32 {.inline.} =
+  v.need(4)
+  v.base[v.pos].uint32 or (v.base[v.pos + 1].uint32 shl 8) or
+    (v.base[v.pos + 2].uint32 shl 16) or (v.base[v.pos + 3].uint32 shl 24)
+
+proc readBytes*(v: var ViewReader; n: int): seq[uint8] =
+  let avail = min(n, v.remaining())
+  result = newSeq[uint8](avail)
+  if avail > 0:
+    copyMem(result[0].addr, v.base[v.pos].addr, avail)
+  v.pos += avail
+
+proc readBytesExact*(v: var ViewReader; n: int): seq[uint8] =
+  v.need(n)
+  result = newSeq[uint8](n)
+  if n > 0:
+    copyMem(result[0].addr, v.base[v.pos].addr, n)
+  v.pos += n
+
+proc ignoreBytes*(v: var ViewReader; n: int) {.inline.} =
+  v.need(n)
+  v.pos += n
+
+proc readU16Le*(v: var ViewReader): uint16 {.inline.} =
+  v.need(2)
+  result = v.base[v.pos].uint16 or (v.base[v.pos + 1].uint16 shl 8)
+  v.pos += 2
+
+proc readU16Be*(v: var ViewReader): uint16 {.inline.} =
+  v.need(2)
+  result = (v.base[v.pos].uint16 shl 8) or v.base[v.pos + 1].uint16
+  v.pos += 2
+
+proc readI16Le*(v: var ViewReader): int16 {.inline.} = cast[int16](v.readU16Le())
+proc readI16Be*(v: var ViewReader): int16 {.inline.} = cast[int16](v.readU16Be())
+
+proc readU24Le*(v: var ViewReader): uint32 {.inline.} =
+  v.need(3)
+  result =
+    v.base[v.pos].uint32 or
+    (v.base[v.pos + 1].uint32 shl 8) or
+    (v.base[v.pos + 2].uint32 shl 16)
+  v.pos += 3
+
+proc readU24Be*(v: var ViewReader): uint32 {.inline.} =
+  v.need(3)
+  result =
+    (v.base[v.pos].uint32 shl 16) or
+    (v.base[v.pos + 1].uint32 shl 8) or
+    v.base[v.pos + 2].uint32
+  v.pos += 3
+
+proc readI24Le*(v: var ViewReader): int32 {.inline.} =
+  cast[int32](v.readU24Le() shl 8) shr 8
+
+proc readI24Be*(v: var ViewReader): int32 {.inline.} =
+  cast[int32](v.readU24Be() shl 8) shr 8
+
+proc readU32Le*(v: var ViewReader): uint32 {.inline.} =
+  v.need(4)
+  result =
+    v.base[v.pos].uint32 or
+    (v.base[v.pos + 1].uint32 shl 8) or
+    (v.base[v.pos + 2].uint32 shl 16) or
+    (v.base[v.pos + 3].uint32 shl 24)
+  v.pos += 4
+
+proc readU32Be*(v: var ViewReader): uint32 {.inline.} =
+  v.need(4)
+  result =
+    (v.base[v.pos].uint32 shl 24) or
+    (v.base[v.pos + 1].uint32 shl 16) or
+    (v.base[v.pos + 2].uint32 shl 8) or
+    v.base[v.pos + 3].uint32
+  v.pos += 4
+
+proc readI32Le*(v: var ViewReader): int32 {.inline.} = cast[int32](v.readU32Le())
+proc readI32Be*(v: var ViewReader): int32 {.inline.} = cast[int32](v.readU32Be())
+
+proc readU64Le*(v: var ViewReader): uint64 =
+  v.need(8)
+  result = 0
+  for i in 0 ..< 8:
+    result = result or (v.base[v.pos + i].uint64 shl (8 * i))
+  v.pos += 8
+
+proc readU64Be*(v: var ViewReader): uint64 =
+  v.need(8)
+  result = 0
+  for i in 0 ..< 8:
+    result = result or (v.base[v.pos + i].uint64 shl (8 * (7 - i)))
+  v.pos += 8
+
+proc readI64Le*(v: var ViewReader): int64 {.inline.} = cast[int64](v.readU64Le())
+proc readI64Be*(v: var ViewReader): int64 {.inline.} = cast[int64](v.readU64Be())
+
+proc readF32Le*(v: var ViewReader): float32 {.inline.} =
+  cast[float32](v.readU32Le())
+proc readF32Be*(v: var ViewReader): float32 {.inline.} =
+  cast[float32](v.readU32Be())
+
+proc readF64Le*(v: var ViewReader): float64 =
+  v.need(8)
+  var u: uint64 = 0
+  for i in 0 ..< 8:
+    u = u or (v.base[v.pos + i].uint64 shl (8 * i))
+  v.pos += 8
+  cast[float64](u)
+
+proc readF64Be*(v: var ViewReader): float64 =
+  v.need(8)
+  var u: uint64 = 0
+  for i in 0 ..< 8:
+    u = u or (v.base[v.pos + i].uint64 shl (8 * (7 - i)))
+  v.pos += 8
+  cast[float64](u)
+
+proc readFourCc*(v: var ViewReader): array[4, uint8] =
+  v.need(4)
+  for i in 0 ..< 4:
+    result[i] = v.base[v.pos + i]
+  v.pos += 4
+
 # ---------------------------------------------------------------- Writer ---
 
 proc newWriter*(): Writer {.inline.} = Writer(buf: @[])

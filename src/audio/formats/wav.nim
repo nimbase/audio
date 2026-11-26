@@ -18,6 +18,7 @@ import ./../formats
 import ./../io
 import ./../metadata
 import ./../packet
+import ./../source
 import ./../units
 import ../codecs/adpcm
 import ../codecs/pcm
@@ -145,7 +146,7 @@ type
     blockSize*: uint32
     framesPerBlock*: uint64
 
-proc parsePcmFmt(r: var Reader; chunkLen: uint32; numChannels: int;
+proc parsePcmFmt[R](r: var R; chunkLen: uint32; numChannels: int;
     sampleRate: uint32; bitsPerSample: uint16): ParsedFmt =
   if chunkLen == 18:
     # Quirk carried from the reference: the extension length is read
@@ -172,7 +173,7 @@ proc parsePcmFmt(r: var Reader; chunkLen: uint32; numChannels: int;
   let frameLen = (bitsPerSample.uint32 div 8) * numChannels.uint32
   ParsedFmt(params: params, blockSize: frameLen, framesPerBlock: 1)
 
-proc parseIeeeFmt(r: var Reader; chunkLen: uint32; numChannels: int;
+proc parseIeeeFmt[R](r: var R; chunkLen: uint32; numChannels: int;
     sampleRate: uint32; bitsPerSample: uint16): ParsedFmt =
   if chunkLen == 18:
     if r.readU16Le() != 0:
@@ -192,7 +193,7 @@ proc parseIeeeFmt(r: var Reader; chunkLen: uint32; numChannels: int;
   let frameLen = (bitsPerSample.uint32 div 8) * numChannels.uint32
   ParsedFmt(params: params, blockSize: frameLen, framesPerBlock: 1)
 
-proc parseAdpcmFmt(r: var Reader; chunkLen: uint32; waveFormat: uint16;
+proc parseAdpcmFmt[R](r: var R; chunkLen: uint32; waveFormat: uint16;
     numChannels: int; sampleRate: uint32; blockAlign: uint16): ParsedFmt =
   if chunkLen < 20:
     raise decodeError("wav: malformed fmt chunk")
@@ -221,7 +222,7 @@ proc parseAdpcmFmt(r: var Reader; chunkLen: uint32; waveFormat: uint16;
   ParsedFmt(params: params, blockSize: blockAlign.uint32,
     framesPerBlock: frames)
 
-proc parseExtensibleFmt(r: var Reader; chunkLen: uint32; numChannels: int;
+proc parseExtensibleFmt[R](r: var R; chunkLen: uint32; numChannels: int;
     sampleRate: uint32; bitsPerSample: uint16): ParsedFmt =
   if chunkLen < 40:
     raise decodeError("wav: malformed fmt chunk")
@@ -279,7 +280,7 @@ proc parseExtensibleFmt(r: var Reader; chunkLen: uint32; numChannels: int;
   let frameLen = (bitsPerSample.uint32 div 8) * numChannels.uint32
   ParsedFmt(params: params, blockSize: frameLen, framesPerBlock: 1)
 
-proc parseXLawFmt(r: var Reader; chunkLen: uint32; waveFormat: uint16;
+proc parseXLawFmt[R](r: var R; chunkLen: uint32; waveFormat: uint16;
     numChannels: int; sampleRate: uint32): ParsedFmt =
   if chunkLen != 18:
     raise decodeError("wav: malformed fmt chunk")
@@ -293,7 +294,7 @@ proc parseXLawFmt(r: var Reader; chunkLen: uint32; waveFormat: uint16;
   ParsedFmt(params: params, blockSize: numChannels.uint32,
     framesPerBlock: 1)
 
-proc parseFmtChunk(r: var Reader; chunkLen: uint32): ParsedFmt =
+proc parseFmtChunk[R](r: var R; chunkLen: uint32): ParsedFmt =
   if chunkLen < 16:
     raise decodeError("wav: malformed fmt chunk")
   let waveFormat = r.readU16Le()
@@ -319,7 +320,7 @@ proc parseFmtChunk(r: var Reader; chunkLen: uint32): ParsedFmt =
 
 # ------------------------------------------------------------ chunks ---
 
-proc readInfoChunk(r: var Reader; listLen: int): MetadataRevision =
+proc readInfoChunk[R](r: var R; listLen: int): MetadataRevision =
   ## Parses a LIST/INFO body into tags. Unknown keys are kept verbatim;
   ## truncated tails stop parsing instead of erroring.
   const keyMap = [
@@ -331,14 +332,11 @@ proc readInfoChunk(r: var Reader; listLen: int): MetadataRevision =
   while pos + 8 <= listLen:
     if r.remaining() < 8:
       break
-    var tag: array[4, uint8]
-    for i in 0 ..< 4:
-      tag[i] = r.data[r.pos + i]
-    let n = (r.data[r.pos + 4].uint32) or (r.data[r.pos + 5].uint32 shl 8) or
-      (r.data[r.pos + 6].uint32 shl 16) or (r.data[r.pos + 7].uint32 shl 24)
-    if n.uint64 > (listLen - pos - 8).uint64 or n.int > r.remaining() - 8:
+    let tag = r.readFourCc()
+    let n = r.peekU32Le()
+    if n.uint64 > (listLen - pos - 8).uint64 or n.int > r.remaining() - 4:
       break
-    r.pos += 8
+    r.ignoreBytes(4)
     pos += 8
     var bytes = r.readBytesExact(n.int)
     pos += n.int
@@ -360,9 +358,20 @@ proc readInfoChunk(r: var Reader; listLen: int): MetadataRevision =
 
 # ------------------------------------------------------------ demuxer ---
 
-proc openWav*(data: seq[uint8]): WavReader =
-  ## Opens a complete RIFF/WAVE stream held in memory.
-  var r = newReader(data)
+type
+  WavHeader* = object
+    ## Result of the shared RIFF/WAVE header scan: codec params plus the
+    ## audio data window. `dataStart`/`dataEnd` are absolute file offsets.
+    params*: AudioCodecParameters
+    packetInfo*: PacketInfo
+    factFrames*: Option[uint64]
+    metaLog*: MetadataLog
+    dataStart*: int
+    dataEnd*: Option[int]
+
+proc scanWavHeader[R](r: var R; totalLen: int): WavHeader =
+  ## Walks RIFF chunks up to the `data` chunk. Shared by the owning and
+  ## mapped opens; `R` is `Reader` or `ViewReader`.
   if r.remaining() < 12 or r.readFourCc() != TagRiff:
     raise unsupportedError("wav: missing wave riff stream marker")
   let riffLen = r.readU32Le()
@@ -373,7 +382,7 @@ proc openWav*(data: seq[uint8]): WavReader =
   # 0xFFFFFFFF means "unknown length" (ffmpeg stdout quirk).
   let bounded = riffLen != high(uint32)
   let riffEnd =
-    if bounded: 8 + riffLen.int else: data.len
+    if bounded: 8 + riffLen.int else: totalLen
   var parsed: Option[ParsedFmt] = none(ParsedFmt)
   var packetInfo = withoutBlocks(1)
   var factFrames: Option[uint64] = none(uint64)
@@ -382,27 +391,27 @@ proc openWav*(data: seq[uint8]): WavReader =
   var dataEndOpt: Option[int] = none(int)
   # Chunks are word-aligned: a pad byte follows odd-length bodies. The pad
   # state is derived from the cursor, like ChunksReader's `consumed`.
-  let bodyStart = r.pos
-  while r.pos < riffEnd:
-    if ((r.pos - bodyStart) and 1) == 1:
+  let bodyStart = r.getPos()
+  while r.getPos() < riffEnd:
+    if ((r.getPos() - bodyStart) and 1) == 1:
       r.ignoreBytes(1)
       continue
-    if riffEnd - r.pos < 8:
+    if riffEnd - r.getPos() < 8:
       break
     let tag = r.readFourCc()
     let chunkLen = r.readU32Le()
-    let bodyEnd = r.pos + chunkLen.int
+    let bodyEnd = r.getPos() + chunkLen.int
     if bounded and bodyEnd > riffEnd:
       raise decodeError("wav: chunk length exceeds parent chunk length")
-    let bodyClamp = min(bodyEnd, data.len)
+    let bodyClamp = min(bodyEnd, totalLen)
     if tag == TagFmt:
       if parsed.isSome:
         raise decodeError("wav: duplicate fmt chunk")
       let fmt = parseFmtChunk(r, chunkLen)
-      if r.pos > bodyEnd:
+      if r.getPos() > bodyEnd:
         raise decodeError("wav: malformed fmt chunk")
-      if r.pos < bodyClamp:
-        r.ignoreBytes(bodyClamp - r.pos)
+      if r.getPos() < bodyClamp:
+        r.ignoreBytes(bodyClamp - r.getPos())
       let pi =
         if fmt.framesPerBlock == 1: withoutBlocks(fmt.blockSize)
         else: withBlocks(cast[uint16](fmt.blockSize), fmt.framesPerBlock)
@@ -416,46 +425,56 @@ proc openWav*(data: seq[uint8]): WavReader =
       if chunkLen != 4:
         raise decodeError("wav: malformed fact chunk")
       factFrames = some(r.readU32Le().uint64)
-      if r.pos < bodyClamp:
-        r.ignoreBytes(bodyClamp - r.pos)
+      if r.getPos() < bodyClamp:
+        r.ignoreBytes(bodyClamp - r.getPos())
     elif tag == TagList:
       if chunkLen < 4:
         raise decodeError("wav: malformed list chunk")
       if r.readFourCc() == TagInfo:
         metaLog.push(readInfoChunk(r, chunkLen.int - 4))
-      if r.pos < bodyClamp:
-        r.ignoreBytes(bodyClamp - r.pos)
+      if r.getPos() < bodyClamp:
+        r.ignoreBytes(bodyClamp - r.getPos())
     elif tag == TagData:
       if parsed.isNone:
         raise decodeError("wav: missing format chunk")
-      dataStart = r.pos
+      dataStart = r.getPos()
       dataEndOpt =
         if chunkLen == high(uint32): none(int)
         else: some(bodyClamp)
       break # Data is last; packetization starts here.
     else:
       # Unknown chunk: skip.
-      if r.pos < bodyClamp:
-        r.ignoreBytes(bodyClamp - r.pos)
-    if r.pos < bodyClamp:
-      r.ignoreBytes(bodyClamp - r.pos)
+      if r.getPos() < bodyClamp:
+        r.ignoreBytes(bodyClamp - r.getPos())
+    if r.getPos() < bodyClamp:
+      r.ignoreBytes(bodyClamp - r.getPos())
   if dataStart < 0:
     if parsed.isNone:
       raise decodeError("wav: missing format chunk")
     raise unsupportedError("wav: missing data chunk")
-  let fmt = parsed.get
-  var track = newTrack(0, fmt.params)
-  if factFrames.isSome:
-    track.numFrames = factFrames
-  if dataEndOpt.isSome:
-    let nFrames =
-      packetInfo.getNumFramesAt(cast[uint64](dataEndOpt.get - dataStart))
+  WavHeader(params: parsed.get.params, packetInfo: packetInfo,
+    factFrames: factFrames, metaLog: metaLog, dataStart: dataStart,
+    dataEnd: dataEndOpt)
+
+proc buildWavTrack(h: WavHeader): Track =
+  var track = newTrack(0, h.params)
+  if h.factFrames.isSome:
+    track.numFrames = h.factFrames
+  if h.dataEnd.isSome:
+    let nFrames = h.packetInfo.getNumFramesAt(
+      cast[uint64](h.dataEnd.get - h.dataStart))
     track.numFrames = some(nFrames)
     track.duration = some(newDuration(nFrames))
-  result = WavReader(r: r, tracks: @[track], params: fmt.params,
-    packetInfo: packetInfo, dataStart: dataStart, dataEnd: dataEndOpt,
-    metadata: metaLog)
-  result.r.pos = dataStart
+  track
+
+proc openWav*(data: seq[uint8]): WavReader =
+  ## Opens a complete RIFF/WAVE stream held in memory.
+  var r = newReader(data)
+  let h = scanWavHeader(r, data.len)
+  result = WavReader(r: r, tracks: @[buildWavTrack(h)], params: h.params,
+    packetInfo: h.packetInfo, dataStart: h.dataStart, dataEnd: h.dataEnd,
+    metadata: h.metaLog)
+  result.r.pos = h.dataStart
 
 proc trackCount*(w: WavReader): int {.inline.} = w.tracks.len
 
@@ -481,9 +500,9 @@ proc nextPacket*(w: WavReader): Option[Packet] =
   let buf = w.r.readBytesExact(nBytes)
   some(newPacket(0, pts, newDuration(dur), buf))
 
-proc seek*(w: WavReader; to: SeekTo): SeekedTo =
-  ## Seeks to a sample timestamp or wall-clock time.
-  let track = w.tracks[0]
+proc wavSeekPos*(track: Track; info: PacketInfo; dataStart: int;
+    to: SeekTo): tuple[pos: int, seeked: SeekedTo] =
+  ## Shared sample-timestamp seek math for both WAV readers.
   var req: Timestamp
   if to.byTime:
     if track.timeBase.isNone:
@@ -501,9 +520,93 @@ proc seek*(w: WavReader; to: SeekTo): SeekedTo =
   if track.numFrames.isSome and
       cast[uint64](req.get) > track.numFrames.get:
     raise seekError(skOutOfRange)
-  let actual = w.packetInfo.getActualTs(req)
-  w.r.pos = w.dataStart + (actual.get.uint64 * w.packetInfo.blockSize).int
-  SeekedTo(trackId: 0, requiredTs: req, actualTs: actual)
+  let actual = info.getActualTs(req)
+  let pos = dataStart + (actual.get.uint64 * info.blockSize).int
+  (pos, SeekedTo(trackId: 0, requiredTs: req, actualTs: actual))
+
+proc seek*(w: WavReader; to: SeekTo): SeekedTo =
+  ## Seeks to a sample timestamp or wall-clock time.
+  let (pos, seeked) = wavSeekPos(w.tracks[0], w.packetInfo, w.dataStart, to)
+  w.r.pos = pos
+  seeked
+
+# -------------------------------------------------- mapped demuxer ---
+
+type
+  WavMappedReader* = ref object
+    ## Streaming WAV demuxer over a memory-mapped file. The mapping owns
+    ## every byte; packets are windows into it (`PacketView`), so a 100 MB
+    ## file decodes with no file-sized heap copy. Keep the reader open
+    ## while any view is in use; `close` unmaps.
+    src*: MappedSource
+    tracks*: seq[Track]
+    params*: AudioCodecParameters
+    packetInfo*: PacketInfo
+    dataStart*: int
+    dataEnd*: Option[int]
+    pos*: int
+    metadata*: MetadataLog
+
+proc openWavMapped*(path: string): WavMappedReader =
+  ## Maps `path` and scans its header. Packet windows stay zero-copy.
+  let src = openMappedSource(path)
+  try:
+    var vr = viewReader(src, 0, src.mappedLen)
+    let h = scanWavHeader(vr, src.mappedLen)
+    result = WavMappedReader(src: src, tracks: @[buildWavTrack(h)],
+      params: h.params, packetInfo: h.packetInfo, dataStart: h.dataStart,
+      dataEnd: h.dataEnd, pos: h.dataStart, metadata: h.metaLog)
+  except AudioError:
+    src.close()
+    raise
+
+proc close*(w: WavMappedReader) =
+  ## Unmaps the file. Outstanding views become invalid.
+  if w != nil and w.src != nil:
+    w.src.close()
+
+proc trackCount*(w: WavMappedReader): int {.inline.} = w.tracks.len
+
+proc mediaInfo*(w: WavMappedReader): MediaInfo =
+  let t = w.tracks[0]
+  MediaInfo(timeBase: t.timeBase, duration: t.duration, startTs: t.startTs)
+
+proc numFrames*(w: WavMappedReader): Option[uint64] = w.tracks[0].numFrames
+
+proc nextPacketView*(w: WavMappedReader): Option[PacketView] =
+  ## Next packet as a mapping window. No bytes are copied; decode with
+  ## `decodePacketView` (PCM) or `packetSeq`/`loadPacketInto` for compat.
+  let info = w.packetInfo
+  let stop = if w.dataEnd.isSome: w.dataEnd.get else: w.src.mappedLen
+  if w.pos >= stop:
+    return none(PacketView)
+  let blocksLeft = (stop - w.pos).uint64 div info.blockSize
+  if blocksLeft == 0:
+    return none(PacketView)
+  let blocks = min(blocksLeft, info.maxBlocksPerPacket)
+  let dur = blocks * info.framesPerBlock
+  let nBytes = (blocks * info.blockSize).int
+  let rel = cast[uint64](w.pos - w.dataStart)
+  let pts = newTimestamp(cast[int64](info.getNumFramesAt(rel)))
+  let v = PacketView(trackId: 0, pts: pts, dts: pts, dur: newDuration(dur),
+    trimStart: ZeroDuration, trimEnd: ZeroDuration,
+    src: w.src, off: w.pos, len: nBytes)
+  w.pos += nBytes
+  some(v)
+
+proc nextPacket*(w: WavMappedReader): Option[Packet] =
+  ## Owning-copy packets (same timing as `nextPacketView`, bounded copy).
+  let v = w.nextPacketView()
+  if v.isNone:
+    return none(Packet)
+  let pv = v.get
+  some(newPacket(pv.trackId, pv.pts, pv.dur, pv.packetSeq()))
+
+proc seek*(w: WavMappedReader; to: SeekTo): SeekedTo =
+  ## Seeks to a sample timestamp or wall-clock time.
+  let (pos, seeked) = wavSeekPos(w.tracks[0], w.packetInfo, w.dataStart, to)
+  w.pos = pos
+  seeked
 
 # ------------------------------------------------------------- muxer ---
 

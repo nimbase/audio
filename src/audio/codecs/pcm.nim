@@ -23,6 +23,7 @@ import ./../codecs
 import ./../errors
 import ./../io
 import ./../packet
+import ./../source
 
 const
   XLawQuantMask = 0x0f'u8
@@ -221,12 +222,10 @@ proc newPcmDecoder*(params: AudioCodecParameters;
     buf: newAudioSamples(fmt, spec, capacity),
   )
 
-proc decodeFrames(d: PcmDecoder; data: seq[uint8]) =
-  ## Decodes one interleaved packet body into `d.buf`.
+proc decodeFramesFrom[R](d: PcmDecoder; r: var R; nFrames: int) =
+  ## Decode core shared by the owning (`Reader`) and zero-copy
+  ## (`ViewReader`) paths. `R` only needs the `io` primitive set.
   let nch = d.buf.specOf().channels.channelCount()
-  checkDecode(d.bytesPerFrame > 0, "pcm: invalid frame size")
-  let nFrames = data.len div d.bytesPerFrame
-  var r = newReader(data)
   let sh = d.shift
   let codec = d.params.codec
   if codec == CodecPcmALaw:
@@ -295,12 +294,34 @@ method reset*(d: PcmDecoder) =
   ## No inter-packet state: nothing to do.
   discard
 
+proc decodeFrames(d: PcmDecoder; data: seq[uint8]) =
+  ## Owning decode: copies nothing itself, but `data` is an owned packet.
+  checkDecode(d.bytesPerFrame > 0, "pcm: invalid frame size")
+  var r = newReader(data)
+  d.decodeFramesFrom(r, data.len div d.bytesPerFrame)
+
+proc decodePcmView*(d: PcmDecoder; src: MappedSource; off, len: int) =
+  ## Zero-copy decode straight from a mapping window. No packet `seq` is
+  ## allocated; output still reuses the decoder's internal buffer.
+  checkDecode(d.bytesPerFrame > 0, "pcm: invalid frame size")
+  var vr = viewReader(src, off, len)
+  try:
+    d.decodeFramesFrom(vr, len div d.bytesPerFrame)
+  except AudioError as e:
+    d.buf.clearSamples()
+    raise e
+
 method decodePacket*(d: PcmDecoder; pkt: Packet): AudioSamples =
   try:
     d.decodeFrames(pkt.data)
   except AudioError as e:
     d.buf.clearSamples()
     raise e
+  d.buf
+
+proc decodePacketView*(d: PcmDecoder; v: PacketView): AudioSamples =
+  ## View-based `decodePacket`: identical output, no packet copy.
+  d.decodePcmView(v.src, v.off, v.len)
   d.buf
 
 method lastDecoded*(d: PcmDecoder): AudioSamples = d.buf

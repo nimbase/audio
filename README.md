@@ -29,6 +29,8 @@
 - Decoder registry: `registerPcm()`, `registerAdpcm()`, `registerVorbis()`,
   `registerMpa()`, `registerAac()`, `registerAlac()`,
   then `makeAudioDecoder(params)`
+- Streaming: mmap file source + 1 MiB reusable byte pool, zero-copy
+  packet views (`openWavMapped`, `decodePacketView`)
 
 Codec support (`o` = decode, `w` = encode):
 
@@ -113,8 +115,6 @@ while true:
 import std/options
 import audio
 
-registerVorbis()
-
 let bytes = readFile("fix_stereo.ogg").toBytes()
 let reader = openOgg(bytes)              # probeOgg == 255
 let dec = newVorbisDecoder(reader.tracks[0].codec,
@@ -133,8 +133,6 @@ while true:
 import std/options
 import audio
 
-registerMpa()
-
 let bytes = readFile("fix_mp3stereo.mp3").toBytes()
 let reader = openMpa(bytes)              # probeMpa == 255
 let dec = newMpaDecoder(reader.tracks[0].codec,
@@ -152,8 +150,6 @@ while true:
 ```nim
 import std/options
 import audio
-
-registerAac()
 
 let bytes = readFile("fix_aacstereo.m4a").toBytes()
 let reader = openMp4(bytes)              # probeMp4 == 255
@@ -176,8 +172,6 @@ discard for gapless playback).
 import std/options
 import audio
 
-registerAlac()
-
 let bytes = readFile("fix_alacstereo.m4a").toBytes()
 let reader = openMp4(bytes)              # alac sample entry + cookie
 # let reader = openCaf(readFile("fix_alacstereo.caf").toBytes())
@@ -196,8 +190,6 @@ while true:
 ```nim
 import std/options
 import audio
-
-registerPcm()
 
 let bytes = readFile("fix_aiffmono.aiff").toBytes()
 let reader = openAiff(bytes)             # probeAiff == 255
@@ -231,6 +223,26 @@ while true:
   echo samples.framesOf(), " frames"
 ```
 
+### Streaming WAV (mmap + 1 MiB pool)
+
+```nim
+import audio
+
+let reader = openWavMapped("big.wav") # zero-copy file mapping
+let dec = newPcmDecoder(reader.params)
+var pool = initStreamPool()            # 1 MiB reusable packet scratch
+
+while true:
+  let view = reader.nextPacketView()
+  if view.isNone: break
+  # No packet copy: decode straight from the mapping.
+  echo dec.decodePacketView(view.get).framesOf(), " frames"
+  # Or copy the window into the pool for compat paths:
+  loadPacketInto(pool, view.get)
+
+reader.close()
+```
+
 ### Probe + seek
 
 ```nim
@@ -254,8 +266,9 @@ if probeWav(bytes) == 255:
 - [x] AAC-LC decoder + ISOMP4 demuxer
 - [x] ALAC decoder + AIFF/CAF demuxers
 - [x] MKV/WebM demuxer (Vorbis/FLAC/MP3/AAC/ALAC/PCM decode, Opus demux-only)
+- [x] Streaming WAV: mmap source + 1 MiB byte pool, zero-copy views
 - [ ] Later: WavPack, pure-Nim Opus + HE-AAC ports, streaming
-  I/O, fuzz corpus, benchmarks
+  I/O for the remaining formats, fuzz corpus, benchmarks
 
 ### ❤ Credits
 
