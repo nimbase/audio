@@ -45,9 +45,16 @@ Codec support (`o` = decode, `w` = encode):
   with Vorbis comment metadata
 - Vorbis: o — decoder (codebooks, floor 0/1, residues, IMDCT); matches
   ffmpeg within 2 LSB on sine fixtures
-- MP3: o — MPEG-1/2/2.5 Layer 1/2/3 decoder (reservoir, Huffman,
+- MP3: o+w — MPEG-1/2/2.5 Layer 1/2/3 decoder (reservoir, Huffman,
   hybrid synthesis) + raw-stream demuxer (Xing/Info/LAME gapless,
-  VBRI, CBR estimate, seek); matches ffmpeg/mpg123 within 2 LSB
+  VBRI, CBR estimate, seek); matches ffmpeg/mpg123 within 2 LSB.
+  Layer III encoder: analysis filterbank, forward MDCT, quantizer,
+  inner-loop gain search, outer distortion loop, Huffman emit,
+  reservoir scheduler, stereo/MS-joint (incl. auto picker),
+  short/mixed blocks (forced + signal-driven auto), threshold-in-quiet
+  + quality presets, CBR/VBR, Xing/Info + LAME gapless tag, CRC-16,
+  all nine sample rates; decoded output verified sample-exact
+  (gapless) and within black-box tolerance on fixtures
 - AAC: o — AAC-LC decoder (Huffman, TNS, KBD/sine IMDCT filterbank)
   + ISOMP4 demuxer (stbl sample tables, esds ASC, seek); matches
   ffmpeg within 2 LSB past the 1024-sample priming
@@ -143,6 +150,25 @@ while true:
   if pkt.isNone: break
   let samples = dec.decodePacket(pkt.get) # sfF32 planar
   echo samples.framesOf(), " frames"
+```
+
+### MP3 encode
+
+```nim
+import std/options
+import audio
+
+var opts = defaultMp3EncoderOptions(128, 44_100,
+  MpaMode(kind: mmStereo))
+opts.xing = true
+opts.gapless = true              # Xing/Info + LAME delay/padding tag
+let mp3bytes = encodeMp3Stream(buf, opts)  # complete .mp3 stream
+
+# Joint stereo variants:
+let e = newMp3EncoderJointAuto(128, 44_100) # per-frame MS/LR picker
+e.enableXingInfo()
+e.pushSamplesI16(toS16Interleaved(buf))
+let msbytes = e.finishEncoder()
 ```
 
 ### AAC decode (MP4)
@@ -275,6 +301,9 @@ if probeWav(bytes) == 255:
 - [x] FLAC decoder + encoder (CRC/MD5 verify)
 - [x] Ogg demuxer + Vorbis decoder
 - [x] MP1/MP2/MP3 decoders
+- [x] MP3 (Layer III) encoder: framing, analysis filterbank, MDCT,
+  quantizer, inner/outer loops, Huffman emit, reservoir, MS-joint,
+  short/mixed blocks, VBR, Xing/Info, CRC, all MPEG rates
 - [x] AAC-LC decoder + ISOMP4 demuxer
 - [x] ALAC decoder + AIFF/CAF demuxers
 - [x] MKV/WebM demuxer (Vorbis/FLAC/MP3/AAC/ALAC/PCM decode, Opus demux-only)

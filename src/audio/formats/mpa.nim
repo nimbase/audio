@@ -1,7 +1,8 @@
-## MP3 (MPEG-1/2/2.5 Layers 1-3) demuxer (`MpaReader`).
+## MP3 (MPEG-1/2/2.5 Layers 1-3) demuxer (`MpaReader`) and muxer
+## (`encodeMpaStream`).
 ##
-## Ports `symphonia-bundle-mp3` demuxer/header: byte-wise frame resync
-## with strict next-frame similarity gate, Xing/Info (incl. LAME
+## Demuxer ports `symphonia-bundle-mp3` demuxer/header: byte-wise frame
+## resync with strict next-frame similarity gate, Xing/Info (incl. LAME
 ## delay/padding, CRC-16-ANSI-LE checked) and VBRI duration headers,
 ## CBR fallback estimation, per-packet PTS/duration with gapless trims
 ## derived from the valid-frame window, and binary-search seek with
@@ -9,11 +10,18 @@
 ## Deviations: in-memory with an eager packet index; ID3v2/v1/Lyrics
 ## tags are skipped as junk by resync (as in the reference, which has
 ## no explicit ID3 parsing here).
+##
+## Muxer (`encodeMpaStream`) is new work: Layer III encoder porting
+## `oxideav-mp3` (references/oxideav-mp3). The encoder output is a
+## complete self-delimiting `.mp3` byte stream (frames concatenated;
+## Xing/Info + LAME gapless tag when enabled).
 
 import std/options
+import ./../audio
 import ./../checksum
 import ./../codecs
 import ./../codecs/mpa
+import ./../codecs/mpaenc
 import ./../errors
 import ./../formats
 import ./../io
@@ -609,3 +617,11 @@ proc seek*(w: MpaMappedReader; to: SeekTo): SeekedTo =
   w.posIdx = target
   SeekedTo(trackId: 0, requiredTs: req,
     actualTs: newTimestamp(w.packets[target].pts))
+
+# ------------------------------------------------------------- muxer ---
+
+proc encodeMpaStream*(samples: AudioSamples;
+    opts: Mp3EncoderOptions): seq[uint8] =
+  ## Whole-stream Layer III encode (CBR/VBR, Xing/Info + LAME gapless
+  ## tag when enabled). Output is a complete `.mp3` byte stream.
+  encodeMp3Stream(samples, opts)

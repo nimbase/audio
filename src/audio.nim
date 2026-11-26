@@ -18,6 +18,7 @@ import ./audio/codecs/adpcm
 import ./audio/codecs/flac
 import ./audio/codecs/vorbis
 import ./audio/codecs/mpa
+import ./audio/codecs/mpaenc
 import ./audio/codecs/aac
 import ./audio/codecs/alac
 import ./audio/dsp
@@ -45,6 +46,7 @@ export adpcm
 export flac
 export vorbis
 export mpa
+export mpaenc
 export aac
 export alac
 export dsp

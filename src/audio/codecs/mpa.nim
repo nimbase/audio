@@ -1,5 +1,6 @@
-## MPEG-1/2/2.5 Layer 1/2/3 decoder (no encoder — encoders for these
-## layers are out of scope; Symphonia ships decode-only too).
+## MPEG-1/2/2.5 Layer 1/2/3 decoder (Layer 3 encoder lives in
+## `codecs/mpaenc`; layers 1/2 have no encoder — Symphonia ships
+## decode-only too).
 ##
 ## Ports `symphonia-bundle-mp3` (header, common, decoder, layer12,
 ## layer1, layer2, synthesis, layer3/*): frame header parse, Layer 1/2
@@ -2016,13 +2017,17 @@ proc decodeLayer3Data[L](header: FrameHeader; bs: var L;
     reservoirClear(state.reservoir)
     raise
   let sideLen = header.sideInfoLen()
-  if sideLen > main.len:
+  # `main` starts after the 4-byte header; skip the 2 CRC bytes when the
+  # protection bit is set so the reservoir sees side info + main data.
+  let bodyOff = if header.hasCrc: 2 else: 0
+  if sideLen + bodyOff > main.len:
     reservoirClear(state.reservoir)
     raise decodeError("mpa: truncated side info")
   let underflow =
     try:
       reservoirFill(state.reservoir,
-        main.toOpenArray(sideLen, main.len - 1), frame.mainDataBegin)
+        main.toOpenArray(sideLen + bodyOff, main.len - 1),
+        frame.mainDataBegin)
     except AudioError:
       reservoirClear(state.reservoir)
       raise
