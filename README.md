@@ -251,7 +251,9 @@ and reservoir-backtrack seek included). AAC mirrors it too:
 (ffmpeg parity past the 1024-sample priming). ALAC in MP4 mirrors it
 too via `openMp4Mapped` + `decodePacketView` (bit-exact). Vorbis in Ogg
 mirrors it too: `openOggMapped` + `newVorbisDecoder` + `decodePacketView`
-(ffmpeg parity; cross-page packets assemble into the pool).
+(ffmpeg parity; cross-page packets assemble into the pool). MKV/WebM
+mirrors it too: `openMkvMapped` plus the per-codec `decodePacketView`
+(lace frames are contiguous, so every packet is a mapping view).
 
 ### Probe + seek
 

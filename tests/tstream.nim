@@ -15,6 +15,7 @@ import audio/formats
 import audio/formats/flac as flacfmt
 import audio/formats/mp4 as mp4fmt
 import audio/formats/mpa as mpafmt
+import audio/formats/mkv as mkvfmt
 import audio/formats/ogg as oggfmt
 import audio/formats/wav
 import audio/io
@@ -176,6 +177,22 @@ proc collectAlacMapped(w: Mp4MappedReader; dec: AlacDecoder): seq[seq[int32]] =
 proc collectVorbisMapped(w: OggMappedReader;
     dec: VorbisDecoder): seq[seq[float32]] =
   ## Decodes every packet window (mapping views and pool assemblies).
+  let nch = w.tracks[0].codec.channels.get.channelCount()
+  result = newSeq[seq[float32]](nch)
+  for p in 0 ..< nch:
+    result[p] = @[]
+  while true:
+    let v = w.nextPacketView()
+    if v.isNone:
+      break
+    let s = dec.decodePacketView(v.get)
+    for p in 0 ..< nch:
+      for i in 0 ..< s.framesOf():
+        result[p].add(s.f32.planes[p][i])
+
+proc collectVorbisMkvMapped(w: MkvMappedReader;
+    dec: VorbisDecoder): seq[seq[float32]] =
+  ## Decodes every mapped frame window (all contiguous lace spans).
   let nch = w.tracks[0].codec.channels.get.channelCount()
   result = newSeq[seq[float32]](nch)
   for p in 0 ..< nch:
@@ -792,6 +809,129 @@ suite "streaming vorbis":
     try:
       let a = mem.seek(seekToTimestamp(newTimestamp(20_000), 0))
       let b = w.seek(seekToTimestamp(newTimestamp(20_000), 0))
+      check b.actualTs == a.actualTs
+      check w.nextPacketView().get.pts == mem.nextPacket().get.pts
+    finally:
+      w.close()
+
+suite "streaming mkv":
+  const MkvVorbisFix = "tests/fixtures/fix_vorbis_stereo.mka"
+  const MkvVorbisRef = "tests/fixtures/ref_vorbis_stereo_mkv_dec.wav"
+
+  test "mapped open matches in-memory scan":
+    let raw = readFile(MkvVorbisFix)
+    var bytes = newSeq[uint8](raw.len)
+    for i, c in raw:
+      bytes[i] = cast[uint8](c)
+    let mem = openMkv(bytes)
+    let w = openMkvMapped(MkvVorbisFix)
+    try:
+      check w.trackCount() == mem.trackCount()
+      check w.tracks[0].codec.codec == CodecVorbis
+      check w.tracks[0].codec.sampleRate.get ==
+        mem.tracks[0].codec.sampleRate.get
+      check w.packets.len == mem.packets.len
+      check w.cues.len == mem.cues.len
+      check w.segmentStart == mem.segmentStart
+      for i in 0 ..< w.packets.len:
+        check w.packets[i].stop - w.packets[i].start ==
+          mem.packets[i].data.len
+    finally:
+      w.close()
+
+  test "mapped view decode matches owning decode, ffmpeg within 2 LSB":
+    let raw = readFile(MkvVorbisFix)
+    var bytes = newSeq[uint8](raw.len)
+    for i, c in raw:
+      bytes[i] = cast[uint8](c)
+    registerVorbis()
+    let mem = openMkv(bytes)
+    let mdec = newVorbisDecoder(mem.tracks[0].codec,
+      AudioDecoderOptions(gapless: true, verify: false))
+    var want = newSeq[seq[float32]](2)
+    want[0] = @[]
+    want[1] = @[]
+    while true:
+      let pkt = mem.nextPacket()
+      if pkt.isNone:
+        break
+      let s = mdec.decodePacket(pkt.get)
+      for p in 0 ..< 2:
+        for i in 0 ..< s.framesOf():
+          want[p].add(s.f32.planes[p][i])
+    let w = openMkvMapped(MkvVorbisFix)
+    try:
+      let dec = newVorbisDecoder(w.tracks[0].codec,
+        AudioDecoderOptions(gapless: true, verify: false))
+      let back = collectVorbisMkvMapped(w, dec)
+      check back[0].len == want[0].len
+      for i in 0 ..< want[0].len:
+        check back[0][i] == want[0][i]
+        check back[1][i] == want[1][i]
+      let refs = readRefS16Mpa(MkvVorbisRef, 2)
+      var worst = 0.0
+      for i in 0 ..< refs[0].len:
+        for p in 0 ..< 2:
+          worst = max(worst,
+            abs(back[p][i].float64 * 32768.0 - refs[p][i].float64))
+      check worst <= 2.0
+    finally:
+      w.close()
+
+  test "mapped owning packets match across all codecs":
+    registerVorbis()
+    registerMpa()
+    registerAac()
+    registerAlac()
+    registerFlac()
+    registerPcm()
+    for fix in ["fix_vorbis_stereo.mka", "fix_mp3_stereo.mkv",
+        "fix_aac_stereo.mkv", "fix_flac_stereo.mka", "fix_pcm_stereo.mkv",
+        "fix_alac_stereo.mka"]:
+      let raw = readFile("tests/fixtures/" & fix)
+      var bytes = newSeq[uint8](raw.len)
+      for i, c in raw:
+        bytes[i] = cast[uint8](c)
+      let mem = openMkv(bytes)
+      let mdec = makeAudioDecoder(mem.tracks[0].codec)
+      var wantData: seq[uint8] = @[]
+      var wantPts: seq[int64] = @[]
+      while true:
+        let pkt = mem.nextPacket()
+        if pkt.isNone:
+          break
+        discard mdec.decodePacket(pkt.get)
+        wantData.add(pkt.get.data)
+        wantPts.add(pkt.get.pts.get)
+      let w = openMkvMapped("tests/fixtures/" & fix)
+      try:
+        check w.tracks[0].codec.codec == mem.tracks[0].codec.codec
+        let dec = makeAudioDecoder(w.tracks[0].codec)
+        var gotData: seq[uint8] = @[]
+        var gotPts: seq[int64] = @[]
+        while true:
+          let pkt = w.nextPacket()
+          if pkt.isNone:
+            break
+          discard dec.decodePacket(pkt.get)
+          gotData.add(pkt.get.data)
+          gotPts.add(pkt.get.pts.get)
+        check gotData == wantData
+        check gotPts == wantPts
+      finally:
+        w.close()
+
+  test "mapped seek matches owning seek":
+    let raw = readFile(MkvVorbisFix)
+    var bytes = newSeq[uint8](raw.len)
+    for i, c in raw:
+      bytes[i] = cast[uint8](c)
+    let mem = openMkv(bytes)
+    let w = openMkvMapped(MkvVorbisFix)
+    try:
+      let tid = mem.tracks[0].id
+      let a = mem.seek(seekToTimestamp(newTimestamp(60), tid))
+      let b = w.seek(seekToTimestamp(newTimestamp(60), tid))
       check b.actualTs == a.actualTs
       check w.nextPacketView().get.pts == mem.nextPacket().get.pts
     finally:

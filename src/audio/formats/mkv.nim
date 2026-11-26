@@ -26,6 +26,7 @@ import ./../formats
 import ./../io
 import ./../metadata
 import ./../packet
+import ./../source
 import ./../units
 
 const
@@ -81,10 +82,10 @@ type
     dataSize*: Option[uint64] ## None = unknown size (extends to parent end).
     headerLen*: int
 
-proc readEbmlId(r: var Reader): tuple[id: uint32, len: int] =
+proc readEbmlId[R](r: var R): tuple[id: uint32, len: int] =
   if r.remaining() < 1:
     raise newException(EndOfStream, "mkv: end of stream")
-  let b0 = r.data[r.pos]
+  let b0 = r.readByte()
   var ln = 1
   var mask = 0x80'u8
   while (b0 and mask) == 0:
@@ -92,18 +93,17 @@ proc readEbmlId(r: var Reader): tuple[id: uint32, len: int] =
     inc ln
     if ln > 4:
       raise decodeError("mkv (ebml): invalid element id length")
-  if r.remaining() < ln:
+  if r.remaining() < ln - 1:
     raise newException(EndOfStream, "mkv: end of stream")
-  var id = 0'u32
-  for i in 0 ..< ln:
-    id = (id shl 8) or r.data[r.pos + i].uint32
-  r.pos += ln
+  var id = b0.uint32
+  for _ in 1 ..< ln:
+    id = (id shl 8) or r.readByte().uint32
   (id, ln)
 
-proc readEbmlSize(r: var Reader): tuple[size: Option[uint64], len: int] =
+proc readEbmlSize[R](r: var R): tuple[size: Option[uint64], len: int] =
   if r.remaining() < 1:
     raise newException(EndOfStream, "mkv: end of stream")
-  let b0 = r.data[r.pos]
+  let b0 = r.readByte()
   var ln = 1
   var mask = 0x80'u8
   while (b0 and mask) == 0:
@@ -111,12 +111,11 @@ proc readEbmlSize(r: var Reader): tuple[size: Option[uint64], len: int] =
     inc ln
     if ln > 8:
       raise decodeError("mkv (ebml): invalid data size length")
-  if r.remaining() < ln:
+  if r.remaining() < ln - 1:
     raise newException(EndOfStream, "mkv: end of stream")
   var v = (b0 xor (0x80'u8 shr (ln - 1))).uint64
-  for i in 1 ..< ln:
-    v = (v shl 8) or r.data[r.pos + i].uint64
-  r.pos += ln
+  for _ in 1 ..< ln:
+    v = (v shl 8) or r.readByte().uint64
   var allOne = true
   var m = (1'u64 shl (7 * ln)) - 1
   if ln == 8:
@@ -128,7 +127,7 @@ proc readEbmlSize(r: var Reader): tuple[size: Option[uint64], len: int] =
   else:
     (some(v), ln)
 
-proc readHeader(r: var Reader; parentEnd: int): Option[EbmlHeader] =
+proc readHeader[R](r: var R; parentEnd: int): Option[EbmlHeader] =
   ## Reads one element header or returns none at end of parent. `parentEnd`
   ## is -1 for unknown (extends to EOF).
   if parentEnd >= 0:
@@ -148,7 +147,7 @@ proc readHeader(r: var Reader; parentEnd: int): Option[EbmlHeader] =
       # Overrun: swallow to parent end like the reference.
       r.pos = parentEnd
       return none(EbmlHeader)
-    if stop > r.data.len:
+    if stop > bufLen(r):
       raise decodeError("mkv (ebml): element overruns file")
   EbmlHeader(id: id, dataPos: dataPos, dataSize: size,
     headerLen: dataPos - start).some
@@ -158,11 +157,11 @@ proc elemEnd(h: EbmlHeader; parentEnd: int; fileLen: int): int =
   elif parentEnd >= 0: parentEnd
   else: fileLen
 
-proc skipElem(r: var Reader; h: EbmlHeader; parentEnd: int) =
-  r.pos = elemEnd(h, parentEnd, r.data.len)
+proc skipElem[R](r: var R; h: EbmlHeader; parentEnd: int) =
+  r.pos = elemEnd(h, parentEnd, bufLen(r))
 
-proc readUIntElem(r: var Reader; h: EbmlHeader; parentEnd: int): uint64 =
-  let stop = elemEnd(h, parentEnd, r.data.len)
+proc readUIntElem[R](r: var R; h: EbmlHeader; parentEnd: int): uint64 =
+  let stop = elemEnd(h, parentEnd, bufLen(r))
   let n = stop - r.pos
   if n < 0 or n > 8:
     raise decodeError("mkv (ebml): invalid unsigned integer size")
@@ -171,8 +170,8 @@ proc readUIntElem(r: var Reader; h: EbmlHeader; parentEnd: int): uint64 =
     v = (v shl 8) or r.readByte().uint64
   v
 
-proc readSIntElem(r: var Reader; h: EbmlHeader; parentEnd: int): int64 =
-  let stop = elemEnd(h, parentEnd, r.data.len)
+proc readSIntElem[R](r: var R; h: EbmlHeader; parentEnd: int): int64 =
+  let stop = elemEnd(h, parentEnd, bufLen(r))
   let n = stop - r.pos
   if n < 0 or n > 8:
     raise decodeError("mkv (ebml): invalid signed integer size")
@@ -185,8 +184,8 @@ proc readSIntElem(r: var Reader; h: EbmlHeader; parentEnd: int): int64 =
   let shift = 64 - 8 * n
   cast[int64](v shl shift) shr shift
 
-proc readFloatElem(r: var Reader; h: EbmlHeader; parentEnd: int): float64 =
-  let stop = elemEnd(h, parentEnd, r.data.len)
+proc readFloatElem[R](r: var R; h: EbmlHeader; parentEnd: int): float64 =
+  let stop = elemEnd(h, parentEnd, bufLen(r))
   let n = stop - r.pos
   if n == 0:
     return 0.0
@@ -199,8 +198,8 @@ proc readFloatElem(r: var Reader; h: EbmlHeader; parentEnd: int): float64 =
   else:
     raise decodeError("mkv (ebml): invalid float size")
 
-proc readStringElem(r: var Reader; h: EbmlHeader; parentEnd: int): string =
-  let stop = elemEnd(h, parentEnd, r.data.len)
+proc readStringElem[R](r: var R; h: EbmlHeader; parentEnd: int): string =
+  let stop = elemEnd(h, parentEnd, bufLen(r))
   let n = stop - r.pos
   if n < 0:
     raise decodeError("mkv (ebml): element overruns parent")
@@ -214,8 +213,8 @@ proc readStringElem(r: var Reader; h: EbmlHeader; parentEnd: int): string =
   for i in 0 ..< stopAt:
     result[i] = bytes[i].char
 
-proc readBinaryElem(r: var Reader; h: EbmlHeader; parentEnd: int): seq[uint8] =
-  let stop = elemEnd(h, parentEnd, r.data.len)
+proc readBinaryElem[R](r: var R; h: EbmlHeader; parentEnd: int): seq[uint8] =
+  let stop = elemEnd(h, parentEnd, bufLen(r))
   let n = stop - r.pos
   if n < 0:
     raise decodeError("mkv (ebml): element overruns parent")
@@ -316,9 +315,9 @@ type
     language*: string
     isAudio*: bool
 
-proc parseAudio(r: var Reader; h: EbmlHeader; parentEnd: int;
+proc parseAudio[R](r: var R; h: EbmlHeader; parentEnd: int;
     t: var RawTrack) =
-  let stop = elemEnd(h, parentEnd, r.data.len)
+  let stop = elemEnd(h, parentEnd, bufLen(r))
   while true:
     let ch = r.readHeader(stop)
     if ch.isNone:
@@ -338,11 +337,11 @@ proc parseAudio(r: var Reader; h: EbmlHeader; parentEnd: int;
     else:
       r.skipElem(c, stop)
 
-proc parseTrackEntry(r: var Reader; h: EbmlHeader;
+proc parseTrackEntry[R](r: var R; h: EbmlHeader;
     parentEnd: int): RawTrack =
   result = RawTrack(channels: 1, sampleRate: 8000.0, trackScale: 1.0,
     language: "eng")
-  let stop = elemEnd(h, parentEnd, r.data.len)
+  let stop = elemEnd(h, parentEnd, bufLen(r))
   while true:
     let ch = r.readHeader(stop)
     if ch.isNone:
@@ -377,7 +376,7 @@ proc parseTrackEntry(r: var Reader; h: EbmlHeader;
       result.language = r.readStringElem(c, stop)
     of EidAudio:
       parseAudio(r, c, stop, result)
-      r.pos = elemEnd(c, stop, r.data.len)
+      r.pos = elemEnd(c, stop, bufLen(r))
     of EidVideo:
       result.isAudio = false
       r.skipElem(c, stop)
@@ -698,9 +697,147 @@ proc extractFrames(blockData: openArray[uint8];
       data: payload))
     pts += d.int64
 
-proc parseCues(r: var Reader; h: EbmlHeader; parentEnd: int;
+proc pcmPayloadDur*(params: AudioCodecParameters; sampleRate: uint32;
+    nch: int; tickNs: float64; byteLen: int): Option[uint64] =
+  ## Duration of a PCM payload in track ticks. Files omit these durations;
+  ## the frame count is exactly computable from payload bytes.
+  var bytesPerSample = 0'u64
+  case params.codec
+  of CodecPcmS16Le, CodecPcmS16Be, CodecPcmU16Le, CodecPcmU16Be:
+    bytesPerSample = 2
+  of CodecPcmS24Le, CodecPcmS24Be, CodecPcmU24Le, CodecPcmU24Be,
+      CodecPcmS32Le, CodecPcmS32Be, CodecPcmU32Le, CodecPcmU32Be,
+      CodecPcmF32Le, CodecPcmF32Be:
+    bytesPerSample = 4
+  of CodecPcmF64Le, CodecPcmF64Be:
+    bytesPerSample = 8
+  of CodecPcmS8, CodecPcmU8:
+    bytesPerSample = 1
+  else:
+    return none(uint64)
+  let bytesPerFrame = bytesPerSample * nch.uint64
+  if bytesPerFrame == 0:
+    return none(uint64)
+  let frames = byteLen.uint64 div bytesPerFrame
+  if frames == 0:
+    return none(uint64)
+  some(nsToTrack((frames.float64 / sampleRate.float64 * 1e9).uint64,
+    tickNs))
+
+proc extractFrameSpans(base: ptr UncheckedArray[uint8]; len: int;
+    blkStart, blkLen: int; states: seq[MkvTrackState];
+    byNum: Table[uint32, int]; clusterTs: uint64;
+    blockDur: Option[uint64]): seq[tuple[trackIdx: int, pts: int64,
+    dur: uint64, start, stop: int]] =
+  ## Lace-frame splitter recording absolute spans instead of copying
+  ## payloads. Lace frames are contiguous inside the block, so every span
+  ## decodes from a direct mapping view (no pool needed for MKV).
+  var r = ViewReader(base: cast[ptr UncheckedArray[uint8]](
+    cast[int](base) +% blkStart), len: blkLen, pos: 0)
+  var pos = 0
+  let trackVint = readVintUnsigned(toOpenArray(base, blkStart,
+    blkStart + blkLen - 1), pos)
+  if trackVint == 0 or trackVint > high(uint32).uint64:
+    raise decodeError("mkv: invalid track number")
+  let trackNum = trackVint.uint32
+  if not byNum.hasKey(trackNum):
+    raise decodeError("mkv: invalid track number for block")
+  let si = byNum[trackNum]
+  let st = states[si]
+  r.pos = pos
+  if r.remaining() < 3:
+    raise decodeError("mkv: truncated block header")
+  let rel = cast[int16](r.readU16Be()).int64
+  let flags = r.readByte()
+  let lacing = (flags shr 1) and 0x3
+  var nFrames = 1
+  if lacing != 0:
+    if r.remaining() < 1:
+      raise decodeError("mkv: truncated block header")
+    nFrames = r.readByte().int + 1
+    if nFrames > MkvMaxBlockFrames:
+      raise decodeError("mkv: too many laced frames")
+  pos = r.pos
+  var sizes: seq[int] = @[]
+  if lacing == 1: # Xiph
+    var total = 0
+    for _ in 0 ..< nFrames - 1:
+      var v = 0
+      while true:
+        if pos >= blkLen:
+          raise decodeError("mkv: truncated lacing sizes")
+        let b = base[blkStart + pos].int
+        inc pos
+        v += b
+        if b != 0xff:
+          break
+      sizes.add(v)
+      total += v
+      if total > blkLen - pos:
+        raise decodeError("mkv: total of laced frame sizes exceeds block")
+  elif lacing == 3: # EBML
+    var total = 0'i64
+    var prev = 0'i64
+    for i in 0 ..< nFrames - 1:
+      var sz: int64
+      if i == 0:
+        sz = readVintUnsigned(toOpenArray(base, blkStart,
+          blkStart + blkLen - 1), pos).int64
+      else:
+        sz = prev + readVintSigned(toOpenArray(base, blkStart,
+          blkStart + blkLen - 1), pos)
+      if sz < 0:
+        raise decodeError("mkv: invalid ebml lacing size")
+      sizes.add(sz.int)
+      total += sz
+      prev = sz
+      if total > (blkLen - pos).int64:
+        raise decodeError("mkv: total of laced frame sizes exceeds block")
+  elif lacing == 2: # Fixed-size
+    let rest = blkLen - pos
+    if rest mod nFrames != 0:
+      raise decodeError("mkv: invalid block size")
+    let each = rest div nFrames
+    for _ in 0 ..< nFrames - 1:
+      sizes.add(each)
+  # Timestamps: cluster (segment ticks) -> track ticks, then relative + delay.
+  let clusterTrack = segToTrack(clusterTs, st.trackScale)
+  if clusterTrack > high(int64) - 32768 or
+      clusterTrack < low(int64) + 32768 + st.codecDelayTicks:
+    return # overflow -> skip block like the reference
+  var pts = clusterTrack + rel - st.codecDelayTicks
+  var baseDur: uint64
+  if blockDur.isSome:
+    baseDur = blockDur.get
+  elif st.hasDefaultDur:
+    baseDur = st.defaultDurTicks * nFrames.uint64
+  else:
+    baseDur = 0
+  var acc = 0'u64
+  for i in 0 ..< nFrames:
+    var d: uint64
+    if baseDur == 0:
+      d = 0
+    else:
+      acc += baseDur
+      d = acc div nFrames.uint64
+      acc = acc mod nFrames.uint64
+    var ln: int
+    if i < sizes.len:
+      ln = sizes[i]
+    else:
+      ln = blkLen - pos
+    if ln < 0 or pos + ln > blkLen:
+      raise decodeError("mkv: total of laced frame sizes exceeds block")
+    # Negative PTS (codec-delay preroll) frames are emitted as-is, like
+    # the reference: `checked_sub_unsigned` only fails on true overflow.
+    result.add((si, pts, d, blkStart + pos, blkStart + pos + ln))
+    pos += ln
+    pts += d.int64
+
+proc parseCues[R](r: var R; h: EbmlHeader; parentEnd: int;
     cues: var seq[MkvCue]) =
-  let stop = elemEnd(h, parentEnd, r.data.len)
+  let stop = elemEnd(h, parentEnd, bufLen(r))
   while true:
     let ph = r.readHeader(stop)
     if ph.isNone:
@@ -709,7 +846,7 @@ proc parseCues(r: var Reader; h: EbmlHeader; parentEnd: int;
     if p.id != EidCuePoint:
       r.skipElem(p, stop)
       continue
-    let pEnd = elemEnd(p, stop, r.data.len)
+    let pEnd = elemEnd(p, stop, bufLen(r))
     var cueTime = none(uint64)
     while true:
       let qh = r.readHeader(pEnd)
@@ -720,7 +857,7 @@ proc parseCues(r: var Reader; h: EbmlHeader; parentEnd: int;
       of EidCueTime:
         cueTime = some(r.readUIntElem(q, pEnd))
       of EidCueTrackPos:
-        let tEnd = elemEnd(q, pEnd, r.data.len)
+        let tEnd = elemEnd(q, pEnd, bufLen(r))
         var trackNum = 0'u64
         var hasTrack = false
         var cPos = 0'u64
@@ -748,16 +885,28 @@ proc parseCues(r: var Reader; h: EbmlHeader; parentEnd: int;
       else:
         r.skipElem(q, pEnd)
 
-proc openMkv*(data: seq[uint8]): MkvReader =
-  if probeMkv(data) == 0:
-    raise unsupportedError("mkv: missing ebml stream marker")
-  var r = newReader(data)
-  result = MkvReader(r: r)
+type
+  MkvHead* = object
+    ## Result of the shared segment scan: tracks, cues, and cluster
+    ## ranges. All positions are absolute file offsets.
+    segmentStart*: int
+    tracks*: seq[Track]
+    trackStates*: seq[MkvTrackState]
+    trackIdxByNum*: Table[uint32, int]
+    cues*: seq[MkvCue]
+    segTimeBase*: TimeBase
+    segScale*: uint64
+    segDur*: Option[uint64]
+    clusterRanges*: seq[array[2, int]]
+
+proc scanMkvHead[R](r: var R; totalLen: int): MkvHead =
+  ## EBML header + segment walk shared by both opens (tracks, cues,
+  ## cluster ranges); `R` is `Reader` or `ViewReader`.
   # EBML header.
   let ebmlH = r.readHeader(-1)
   if ebmlH.isNone or ebmlH.get.id != EidEbml:
     raise decodeError("mkv: missing ebml header")
-  let ebmlEnd = elemEnd(ebmlH.get, -1, data.len)
+  let ebmlEnd = elemEnd(ebmlH.get, -1, totalLen)
   var docType = ""
   while true:
     let ch = r.readHeader(ebmlEnd)
@@ -776,7 +925,7 @@ proc openMkv*(data: seq[uint8]): MkvReader =
     raise unsupportedError("mkv: missing segment element")
   let seg = segH.get
   let segStart = seg.dataPos
-  let segEnd = elemEnd(seg, -1, data.len)
+  let segEnd = elemEnd(seg, -1, totalLen)
   result.segmentStart = segStart
   var scale = 1_000_000'u64
   var segDurF = none(float64)
@@ -791,7 +940,7 @@ proc openMkv*(data: seq[uint8]): MkvReader =
     let c = ch.get
     case c.id
     of EidInfo:
-      let iEnd = elemEnd(c, segEnd, data.len)
+      let iEnd = elemEnd(c, segEnd, totalLen)
       while true:
         let ih = r.readHeader(iEnd)
         if ih.isNone:
@@ -807,7 +956,7 @@ proc openMkv*(data: seq[uint8]): MkvReader =
         else:
           r.skipElem(ic, iEnd)
     of EidTracks:
-      let tEnd = elemEnd(c, segEnd, data.len)
+      let tEnd = elemEnd(c, segEnd, totalLen)
       while true:
         let th = r.readHeader(tEnd)
         if th.isNone:
@@ -815,15 +964,15 @@ proc openMkv*(data: seq[uint8]): MkvReader =
         let t = th.get
         if t.id == EidTrackEntry:
           rawTracks.add(parseTrackEntry(r, t, tEnd))
-          r.pos = elemEnd(t, tEnd, data.len)
+          r.pos = elemEnd(t, tEnd, totalLen)
         else:
           r.skipElem(t, tEnd)
     of EidCues:
       parseCues(r, c, segEnd, cues)
-      r.pos = elemEnd(c, segEnd, data.len)
+      r.pos = elemEnd(c, segEnd, totalLen)
     of EidCluster:
-      clusterRanges.add([c.dataPos, elemEnd(c, segEnd, data.len)])
-      r.pos = elemEnd(c, segEnd, data.len)
+      clusterRanges.add([c.dataPos, elemEnd(c, segEnd, totalLen)])
+      r.pos = elemEnd(c, segEnd, totalLen)
     else:
       # SeekHead, Tags, Attachments, Chapters, Void, CRC32: skipped.
       r.skipElem(c, segEnd)
@@ -834,21 +983,21 @@ proc openMkv*(data: seq[uint8]): MkvReader =
   let segTbOpt = tryNewTimeBase(scale.uint32, NsPerSec)
   if segTbOpt.isNone:
     raise decodeError("mkv: invalid timestamp scale")
-  result.segTimeBase = segTbOpt.get
-  result.segScale = scale
+  let segTimeBase = segTbOpt.get
+  var segDur: Option[uint64] = none(uint64)
   if segDurF.isSome and segDurF.get == segDurF.get and segDurF.get >= 0.0:
-    result.segDur = some(segDurF.get.round().uint64)
+    segDur = some(segDurF.get.round().uint64)
   # Build audio tracks.
-  result.tracks = @[]
-  result.trackStates = @[]
-  result.trackIdxByNum = initTable[uint32, int]()
+  var tracks: seq[Track] = @[]
+  var trackStates: seq[MkvTrackState] = @[]
+  var trackIdxByNum = initTable[uint32, int]()
   for t in rawTracks:
     let mapped = mapAudioTrack(t)
     if mapped.isNone:
       continue
     var params = mapped.get
     var track = newTrack(t.number.uint32, params)
-    var tb = result.segTimeBase
+    var tb = segTimeBase
     var tscale = t.trackScale
     if tscale != tscale or tscale <= 0.0:
       tscale = 1.0
@@ -858,16 +1007,16 @@ proc openMkv*(data: seq[uint8]): MkvReader =
         raise decodeError("mkv: track timebase is invalid")
       tb = scaled.get
     track.timeBase = some(tb)
-    if result.segDur.isSome:
+    if segDur.isSome:
       let dTicks = nsToTrack(
-        (result.segDur.get.float64 * scale.float64).round().uint64,
+        (segDur.get.float64 * scale.float64).round().uint64,
         scale.float64 * tscale)
       track.duration = some(newDuration(dTicks))
-    let idx = result.tracks.len
-    result.tracks.add(track)
+    let idx = tracks.len
+    tracks.add(track)
     let tickNs = scale.float64 * tscale
-    result.trackIdxByNum[t.number.uint32] = idx
-    result.trackStates.add(MkvTrackState(trackNum: t.number.uint32,
+    trackIdxByNum[t.number.uint32] = idx
+    trackStates.add(MkvTrackState(trackNum: t.number.uint32,
       trackIdx: idx, sampleRate: params.sampleRate.get,
       trackScale: tscale, tickNs: tickNs,
       codecDelayTicks: nsToTrack(t.codecDelayNs, tickNs).int64,
@@ -875,14 +1024,26 @@ proc openMkv*(data: seq[uint8]): MkvReader =
         nsToTrack(t.defaultDurationNs, tickNs) else: 0),
       hasDefaultDur: t.hasDefaultDur))
     # Per-track codec params already carry sampleRate/channels/extraData.
-    result.tracks[idx].codec = params
-  if result.tracks.len == 0:
+    tracks[idx].codec = params
+  if tracks.len == 0:
     raise unsupportedError("mkv: no audio track found")
+  MkvHead(segmentStart: segStart, tracks: tracks, trackStates: trackStates,
+    trackIdxByNum: trackIdxByNum, cues: cues, segTimeBase: segTimeBase,
+    segScale: scale, segDur: segDur, clusterRanges: clusterRanges)
+
+proc openMkv*(data: seq[uint8]): MkvReader =
+  if probeMkv(data) == 0:
+    raise unsupportedError("mkv: missing ebml stream marker")
+  var r = newReader(data)
+  let h = scanMkvHead(r, data.len)
+  result = MkvReader(r: r, segmentStart: h.segmentStart, tracks: h.tracks,
+    trackStates: h.trackStates, trackIdxByNum: h.trackIdxByNum,
+    packets: @[], posIdx: 0, cues: h.cues, segTimeBase: h.segTimeBase,
+    segScale: h.segScale, segDur: h.segDur, metadata: MetadataLog())
   # Clusters -> packet index (file order, like the reference).
   result.packets = @[]
-  result.cues = cues
   var rr = newReader(data)
-  for cr in clusterRanges:
+  for cr in h.clusterRanges:
     rr.pos = cr[0]
     # Walk raw cluster payload: first element should be Timestamp/blocks.
     # Reconstruct end-bounded walk.
@@ -941,34 +1102,12 @@ proc openMkv*(data: seq[uint8]): MkvReader =
     let params = result.tracks[ti].codec
     if params.sampleRate.isNone or params.channels.isNone:
       continue
-    var bytesPerSample = 0'u64
-    case params.codec
-    of CodecPcmS16Le, CodecPcmS16Be, CodecPcmU16Le, CodecPcmU16Be:
-      bytesPerSample = 2
-    of CodecPcmS24Le, CodecPcmS24Be, CodecPcmU24Le, CodecPcmU24Be,
-        CodecPcmS32Le, CodecPcmS32Be, CodecPcmU32Le, CodecPcmU32Be,
-        CodecPcmF32Le, CodecPcmF32Be:
-      bytesPerSample = 4
-    of CodecPcmF64Le, CodecPcmF64Be:
-      bytesPerSample = 8
-    of CodecPcmS8, CodecPcmU8:
-      bytesPerSample = 1
-    else:
-      continue
-    let bytesPerFrame = bytesPerSample *
-      params.channels.get.channelCount().uint64
-    if bytesPerFrame == 0:
-      continue
-    let frames = p.data.len.uint64 div bytesPerFrame
-    if frames == 0:
-      continue
     let st = result.trackStates[ti]
-    p.dur = nsToTrack((frames.float64 / st.sampleRate.float64 * 1e9).uint64,
-      st.tickNs)
-  result.posIdx = 0
-  result.metadata = MetadataLog()
-  result.r = newReader(data)
-  result.r.pos = segStart
+    let d = pcmPayloadDur(params, params.sampleRate.get,
+      params.channels.get.channelCount(), st.tickNs, p.data.len)
+    if d.isSome:
+      p.dur = d.get
+  result.r.pos = h.segmentStart
 
 proc trackCount*(w: MkvReader): int {.inline.} = w.tracks.len
 
@@ -990,8 +1129,12 @@ proc nextPacket*(w: MkvReader): Option[Packet] =
   let trackId = w.trackStates[p.trackIdx].trackNum
   some(newPacket(trackId, newTimestamp(p.pts), newDuration(p.dur), p.data))
 
-proc seek*(w: MkvReader; to: SeekTo): SeekedTo =
-  if w.tracks.len == 0:
+proc mkvSeekPos[P](tracks: seq[Track]; trackStates: seq[MkvTrackState];
+    packets: seq[P]; cues: seq[MkvCue]; to: SeekTo): tuple[posIdx: int,
+    seeked: SeekedTo] =
+  ## Cue-assisted search shared by both seeks. Packet types only need
+  ## trackIdx/pts/dur fields (`>=` break matches the reference).
+  if tracks.len == 0:
     raise seekError(skUnseekable)
   var trackIdx = 0
   var req: Timestamp
@@ -999,14 +1142,14 @@ proc seek*(w: MkvReader; to: SeekTo): SeekedTo =
     if to.timeTrackId.isSome:
       let tid = to.timeTrackId.get
       var found = -1
-      for i, t in w.tracks:
+      for i, t in tracks:
         if t.id == tid:
           found = i
           break
       if found < 0:
         raise seekError(skInvalidTrack)
       trackIdx = found
-    let tb = w.tracks[trackIdx].timeBase
+    let tb = tracks[trackIdx].timeBase
     if tb.isNone:
       raise seekError(skUnseekable)
     let ts = tb.get.calcTimestamp(to.time)
@@ -1015,7 +1158,7 @@ proc seek*(w: MkvReader; to: SeekTo): SeekedTo =
     req = ts.get
   else:
     var found = -1
-    for i, t in w.tracks:
+    for i, t in tracks:
       if t.id == to.tsTrackId:
         found = i
         break
@@ -1025,53 +1168,230 @@ proc seek*(w: MkvReader; to: SeekTo): SeekedTo =
     req = to.ts
   if req.isNegative:
     raise seekError(skOutOfRange)
-  let st = w.trackStates[trackIdx]
+  let st = trackStates[trackIdx]
   let trackNum = st.trackNum
   # Upper bound from max packet end on this track.
   var maxEnd = 0'i64
-  for p in w.packets:
+  for p in packets:
     if p.trackIdx == trackIdx:
       let e = p.pts + p.dur.int64
       if e > maxEnd:
         maxEnd = e
-  if req.get > maxEnd and w.packets.len > 0:
+  if req.get > maxEnd and packets.len > 0:
     raise seekError(skOutOfRange)
   # Cue-assisted: last cue at or before target on this track.
   var startIdx = 0
-  if w.cues.len > 0:
+  if cues.len > 0:
     let targetNs = req.get.float64 * st.tickNs
     var best = -1
-    for i, cue in w.cues:
+    for i, cue in cues:
       if cue.trackNum == trackNum and cue.timeNs.float64 <= targetNs:
         best = i
     if best >= 0:
-      let cue = w.cues[best]
+      let cue = cues[best]
       # Find first packet at/after cue time on this track.
       let cueTicks = nsToTrack(cue.timeNs, st.tickNs).int64
-      for i, p in w.packets:
+      for i, p in packets:
         if p.trackIdx == trackIdx and p.pts + p.dur.int64 >= cueTicks and
             p.pts <= req.get:
           startIdx = i
           break
   var idx = startIdx
-  while idx < w.packets.len:
-    let p = w.packets[idx]
+  while idx < packets.len:
+    let p = packets[idx]
     # Reference break condition (`>=`): first packet whose end reaches the
     # target. Zero-duration packets act as points (`pts >= req`).
     if p.trackIdx == trackIdx and p.pts + p.dur.int64 >= req.get:
       break
     inc idx
-  if idx >= w.packets.len:
+  if idx >= packets.len:
     # Target past last packet start but within range: clamp to last packet.
     var last = -1
-    for i in countdown(w.packets.len - 1, 0):
-      if w.packets[i].trackIdx == trackIdx:
+    for i in countdown(packets.len - 1, 0):
+      if packets[i].trackIdx == trackIdx:
         last = i
         break
     if last < 0:
       raise seekError(skOutOfRange)
     idx = last
-  w.posIdx = idx
-  let actual = newTimestamp(w.packets[idx].pts)
-  SeekedTo(trackId: w.tracks[trackIdx].id, requiredTs: req,
-    actualTs: actual)
+  (idx, SeekedTo(trackId: tracks[trackIdx].id, requiredTs: req,
+    actualTs: newTimestamp(packets[idx].pts)))
+
+proc seek*(w: MkvReader; to: SeekTo): SeekedTo =
+  let (posIdx, seeked) = mkvSeekPos(w.tracks, w.trackStates, w.packets,
+    w.cues, to)
+  w.posIdx = posIdx
+  seeked
+
+# -------------------------------------------------- mapped demuxer ---
+
+type
+  MkvSegPacket* = object
+    ## One audio frame as a mapping window. Lace frames are contiguous
+    ## inside their block, so every span decodes zero-copy (no pool).
+    trackIdx*: int
+    pts*: int64
+    dur*: uint64
+    start*: int
+    stop*: int
+
+  MkvMappedReader* = ref object
+    ## Streaming Matroska/WebM demuxer over a memory-mapped file. The
+    ## eager index stores offsets (+ cue table) only; packets are mapping
+    ## windows, so no file-sized heap copy exists. Keep the reader open
+    ## while any view is in use; `close` unmaps. Decode with the existing
+    ## per-codec `decodePacketView` (Vorbis/FLAC/MP3/AAC/ALAC/PCM all
+    ## covered); Opus stays demux-only as before.
+    src*: MappedSource
+    segmentStart*: int
+    tracks*: seq[Track]
+    trackStates*: seq[MkvTrackState]
+    trackIdxByNum*: Table[uint32, int]
+    packets*: seq[MkvSegPacket]
+    posIdx*: int
+    cues*: seq[MkvCue]
+    segTimeBase*: TimeBase
+    segScale*: uint64
+    segDur*: Option[uint64]
+    metadata*: MetadataLog
+
+proc openMkvMapped*(path: string): MkvMappedReader =
+  ## Maps `path` and runs the shared segment scan. The cluster walk
+  ## records frame spans; packet windows stay zero-copy.
+  let src = openMappedSource(path)
+  try:
+    if probeMkv(src.packetBytes(0, src.mappedLen)) == 0:
+      raise unsupportedError("mkv: missing ebml stream marker")
+    var vr = viewReader(src, 0, src.mappedLen)
+    let h = scanMkvHead(vr, src.mappedLen)
+    let (base, len) = src.mappedBase()
+    var packets: seq[MkvSegPacket] = @[]
+    # One file-wide cursor with absolute positions, mirroring the owning
+    # walk (per-element cursors would mix relative and absolute ends).
+    var cr = viewReader(src, 0, len)
+    for hcr in h.clusterRanges:
+      cr.pos = hcr[0]
+      # Walk raw cluster payload: first element should be Timestamp/blocks.
+      # Reconstruct end-bounded walk.
+      let cEnd = hcr[1]
+      var clusterTs = none(uint64)
+      while cr.pos < cEnd:
+        let ch = cr.readHeader(cEnd)
+        if ch.isNone:
+          break
+        let c = ch.get
+        case c.id
+        of EidClusterTimestamp:
+          clusterTs = some(cr.readUIntElem(c, cEnd))
+        of EidSimpleBlock:
+          if clusterTs.isNone:
+            cr.pos = elemEnd(c, cEnd, len)
+            continue
+          # Block payload window: dataPos..elemEnd.
+          let bEnd = elemEnd(c, cEnd, len)
+          for f in extractFrameSpans(base, len, c.dataPos,
+              bEnd - c.dataPos, h.trackStates, h.trackIdxByNum,
+              clusterTs.get, none(uint64)):
+            packets.add(MkvSegPacket(trackIdx: f.trackIdx, pts: f.pts,
+              dur: f.dur, start: f.start, stop: f.stop))
+        of EidBlockGroup:
+          if clusterTs.isNone:
+            cr.pos = elemEnd(c, cEnd, len)
+            continue
+          let gEnd = elemEnd(c, cEnd, len)
+          var hasData = false
+          var dur = none(uint64)
+          var bStart = -1
+          var bLen = 0
+          while true:
+            let gh = cr.readHeader(gEnd)
+            if gh.isNone:
+              break
+            let g = gh.get
+            case g.id
+            of EidBlock:
+              bStart = g.dataPos
+              bLen = elemEnd(g, gEnd, len) - g.dataPos
+              hasData = true
+            of EidBlockDuration:
+              dur = some(cr.readUIntElem(g, gEnd))
+            of EidRefBlock, EidDiscardPadding:
+              discard cr.readSIntElem(g, gEnd)
+            else:
+              discard
+            cr.pos = elemEnd(g, gEnd, len)
+          if hasData:
+            for f in extractFrameSpans(base, len, bStart, bLen,
+                h.trackStates, h.trackIdxByNum, clusterTs.get, dur):
+              packets.add(MkvSegPacket(trackIdx: f.trackIdx, pts: f.pts,
+                dur: f.dur, start: f.start, stop: f.stop))
+        else:
+          discard
+        cr.pos = elemEnd(c, cEnd, len)
+    # PCM duration synthesis from span lengths.
+    for p in packets.mitems:
+      if p.dur != 0:
+        continue
+      let params = h.tracks[p.trackIdx].codec
+      if params.sampleRate.isNone or params.channels.isNone:
+        continue
+      let st = h.trackStates[p.trackIdx]
+      let d = pcmPayloadDur(params, params.sampleRate.get,
+        params.channels.get.channelCount(), st.tickNs, p.stop - p.start)
+      if d.isSome:
+        p.dur = d.get
+    result = MkvMappedReader(src: src, segmentStart: h.segmentStart,
+      tracks: h.tracks, trackStates: h.trackStates,
+      trackIdxByNum: h.trackIdxByNum, packets: packets, posIdx: 0,
+      cues: h.cues, segTimeBase: h.segTimeBase, segScale: h.segScale,
+      segDur: h.segDur, metadata: MetadataLog())
+  except AudioError:
+    src.close()
+    raise
+
+proc close*(w: MkvMappedReader) =
+  ## Unmaps the file. Outstanding views become invalid.
+  if w != nil and w.src != nil:
+    w.src.close()
+
+proc trackCount*(w: MkvMappedReader): int {.inline.} = w.tracks.len
+
+proc mediaInfo*(w: MkvMappedReader): MediaInfo =
+  MediaInfo(timeBase: some(w.segTimeBase), startTs: ZeroTimestamp,
+    duration: (if w.segDur.isSome: some(newDuration(w.segDur.get))
+      else: none(Duration)))
+
+proc numFrames*(w: MkvMappedReader): Option[uint64] =
+  if w.packets.len == 0:
+    return some(0'u64)
+  none(uint64)
+
+proc nextPacketView*(w: MkvMappedReader): Option[PacketView] =
+  ## Next frame as a mapping window. Lace frames are contiguous, so this
+  ## never copies; decode with the per-codec `decodePacketView`.
+  if w.posIdx >= w.packets.len:
+    return none(PacketView)
+  let p = w.packets[w.posIdx]
+  inc w.posIdx
+  let trackId = w.trackStates[p.trackIdx].trackNum
+  some(PacketView(trackId: trackId, pts: newTimestamp(p.pts),
+    dts: newTimestamp(p.pts), dur: newDuration(p.dur),
+    trimStart: ZeroDuration, trimEnd: ZeroDuration,
+    win: byteWindow(w.src, p.start, p.stop - p.start), owner: w.src))
+
+proc nextPacket*(w: MkvMappedReader): Option[Packet] =
+  ## Owning-copy packets (same timing as `nextPacketView`, bounded copy).
+  let v = w.nextPacketView()
+  if v.isNone:
+    return none(Packet)
+  let pv = v.get
+  var pkt = newPacket(pv.trackId, pv.pts, pv.dur, pv.packetSeq())
+  pkt.trimStart = pv.trimStart
+  pkt.trimEnd = pv.trimEnd
+  some(pkt)
+
+proc seek*(w: MkvMappedReader; to: SeekTo): SeekedTo =
+  let (posIdx, seeked) = mkvSeekPos(w.tracks, w.trackStates, w.packets,
+    w.cues, to)
+  w.posIdx = posIdx
+  seeked
