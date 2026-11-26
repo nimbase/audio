@@ -492,6 +492,62 @@ proc ignoreBits*(b: var BitReader; n: int) =
   b.bytePos += b.bitPos div 8
   b.bitPos = b.bitPos mod 8
 
+# ------------------------------------------------------ ViewBitReader ---
+
+type
+  ViewBitReader* = object
+    ## MSB-first bit cursor over borrowed bytes (mapped FLAC frames).
+    ## Same primitive set as `BitReader` but zero-copy: the backing
+    ## (e.g. `MappedSource`) must outlive every view.
+    base*: ptr UncheckedArray[uint8]
+    len*: int
+    bytePos*: int
+    bitPos*: int # Bits already consumed in the current byte (0..7).
+
+proc bitsLeft*(b: ViewBitReader): int {.inline.} =
+  (b.len - b.bytePos) * 8 - b.bitPos
+
+proc readBit*(b: var ViewBitReader): bool =
+  if b.bytePos >= b.len:
+    raise decodeError("bit reader underrun")
+  result = ((b.base[b.bytePos] shr (7 - b.bitPos)) and 1) == 1
+  inc b.bitPos
+  if b.bitPos == 8:
+    b.bitPos = 0
+    inc b.bytePos
+
+proc readBits*(b: var ViewBitReader; n: int): uint32 =
+  ## Reads `n <= 32` bits MSB-first. `n == 0` yields 0 without consuming.
+  if n == 0:
+    return 0
+  checkDecode(n > 0 and n <= 32, "bit reader width out of range")
+  if b.bitsLeft() < n:
+    raise decodeError("bit reader underrun")
+  var need = n
+  while need > 0:
+    let avail = 8 - b.bitPos
+    let take = min(need, avail)
+    let shift = avail - take
+    let chunk = (b.base[b.bytePos] shr shift) and
+      cast[uint8]((1'u32 shl take) - 1)
+    result = (result shl take) or chunk.uint32
+    b.bitPos += take
+    if b.bitPos == 8:
+      b.bitPos = 0
+      inc b.bytePos
+    need -= take
+
+proc readUnaryZeros*(b: var ViewBitReader): uint32 =
+  ## Counts 0 bits up to and including the first 1 bit (Rice quotients).
+  while not b.readBit():
+    inc result
+
+proc restBits*(v: ViewReader): ViewBitReader {.inline.} =
+  ## Bit cursor over the unread tail. Zero-copy: shares the backing.
+  ViewBitReader(
+    base: cast[ptr UncheckedArray[uint8]](cast[int](v.base) +% v.pos),
+    len: v.len - v.pos, bytePos: 0, bitPos: 0)
+
 type
   VlcEntryKind* = enum
     veJump

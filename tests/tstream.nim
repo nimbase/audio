@@ -4,8 +4,10 @@ import unittest
 
 import audio/audio
 import audio/codecs
+import audio/codecs/flac
 import audio/codecs/pcm
 import audio/formats
+import audio/formats/flac as flacfmt
 import audio/formats/wav
 import audio/io
 import audio/packet
@@ -39,6 +41,44 @@ proc collectMapped(w: WavMappedReader; dec: PcmDecoder): AudioSamples =
       for i in 0 ..< s.framesOf():
         result.s16.planes[p][frames + i] = s.s16.planes[p][i]
     result.s16.numFrames = frames + s.framesOf()
+    frames += s.framesOf()
+
+proc collectFlacMapped(w: FlacMappedReader;
+    dec: FlacDecoder): AudioSamples =
+  ## Decodes every frame window with zero packet copies.
+  var frames = 0
+  var first = true
+  while true:
+    let v = w.nextPacketView()
+    if v.isNone:
+      break
+    let s = dec.decodePacketView(v.get)
+    if first:
+      result = newAudioSamples(s.format, s.specOf(), 0)
+      first = false
+    result.s32.growCapacity(frames + s.framesOf())
+    for p in 0 ..< s.s32.planes.len:
+      for i in 0 ..< s.framesOf():
+        result.s32.planes[p][frames + i] = s.s32.planes[p][i]
+    result.s32.numFrames = frames + s.framesOf()
+    frames += s.framesOf()
+
+proc collectFlacMem(w: FlacReader; dec: FlacDecoder): AudioSamples =
+  var frames = 0
+  var first = true
+  while true:
+    let pkt = w.nextPacket()
+    if pkt.isNone:
+      break
+    let s = dec.decodePacket(pkt.get)
+    if first:
+      result = newAudioSamples(s.format, s.specOf(), 0)
+      first = false
+    result.s32.growCapacity(frames + s.framesOf())
+    for p in 0 ..< s.s32.planes.len:
+      for i in 0 ..< s.framesOf():
+        result.s32.planes[p][frames + i] = s.s32.planes[p][i]
+    result.s32.numFrames = frames + s.framesOf()
     frames += s.framesOf()
 
 suite "streaming wav":
@@ -185,3 +225,90 @@ suite "streaming wav":
     r.ignoreBytes(3)
     check v.readByte() == r.readByte()
     check v.getPos() == r.getPos()
+
+suite "streaming flac":
+  test "mapped open matches in-memory header":
+    let src = rampS16(5_000)
+    let bytes = encodeFlacStream(src, 44_100)
+    let path = getTempDir() / "audio_stream_flac_hdr.flac"
+    writeFile(path, cast[string](bytes))
+    try:
+      let mem = openFlac(bytes)
+      let w = openFlacMapped(path)
+      try:
+        check w.trackCount() == mem.trackCount()
+        check w.params.sampleRate.get == 44_100
+        check w.params.bitsPerSample.get == 16
+        check w.numFrames().get == mem.numFrames().get
+        check w.mediaInfo().duration.get == mem.mediaInfo().duration.get
+      finally:
+        w.close()
+    finally:
+      removeFile(path)
+
+  test "mapped view decode is sample-exact, zero packet copies":
+    let src = rampS16(20_000)
+    let bytes = encodeFlacStream(src, 44_100)
+    let path = getTempDir() / "audio_stream_flac.flac"
+    writeFile(path, cast[string](bytes))
+    try:
+      let mem = openFlac(bytes)
+      let mdec = newFlacDecoder(mem.params,
+        AudioDecoderOptions(gapless: true, verify: true))
+      let want = collectFlacMem(mem, mdec)
+      check mdec.finalize().verifyOk.get == true
+      let w = openFlacMapped(path)
+      try:
+        let dec = newFlacDecoder(w.params,
+          AudioDecoderOptions(gapless: true, verify: true))
+        let back = collectFlacMapped(w, dec)
+        check dec.finalize().verifyOk.get == true
+        check back.framesOf() == want.framesOf()
+        for p in 0 ..< want.s32.planes.len:
+          for i in 0 ..< want.framesOf():
+            check back.s32.planes[p][i] == want.s32.planes[p][i]
+      finally:
+        w.close()
+    finally:
+      removeFile(path)
+
+  test "mapped owning packets match views":
+    let src = rampS16(9_000)
+    let path = getTempDir() / "audio_stream_flac_own.flac"
+    writeFile(path, cast[string](encodeFlacStream(src, 44_100)))
+    try:
+      let w = openFlacMapped(path)
+      try:
+        var fromViews: seq[uint8] = @[]
+        var fromOwn: seq[uint8] = @[]
+        while true:
+          let v = w.nextPacketView()
+          if v.isNone:
+            break
+          fromViews.add(v.get.packetSeq())
+        discard w.seek(seekToTimestamp(newTimestamp(0), 0))
+        while true:
+          let pkt = w.nextPacket()
+          if pkt.isNone:
+            break
+          fromOwn.add(pkt.get.data)
+        check fromOwn == fromViews
+      finally:
+        w.close()
+    finally:
+      removeFile(path)
+
+  test "mapped seek lands on frame boundary":
+    let src = rampS16(20_000)
+    let path = getTempDir() / "audio_stream_flac_seek.flac"
+    writeFile(path, cast[string](encodeFlacStream(src, 44_100)))
+    try:
+      let w = openFlacMapped(path)
+      try:
+        let s = w.seek(seekToTimestamp(newTimestamp(5_000), 0))
+        check s.actualTs.get <= 5_000
+        check w.nextPacketView().get.pts.get == s.actualTs.get
+      finally:
+        w.close()
+    finally:
+      removeFile(path)

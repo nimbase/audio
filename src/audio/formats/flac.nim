@@ -22,6 +22,7 @@ import ./../formats
 import ./../io
 import ./../metadata
 import ./../packet
+import ./../source
 import ./../units
 
 const
@@ -75,11 +76,11 @@ const vorbisStdKeys = [
   ("ALBUMARTIST", "album_artist"), ("DISCNUMBER", "disc_number"),
 ]
 
-proc parseVorbisComment*(r: var Reader; bodyLen: int): MetadataRevision =
+proc parseVorbisComment*[R](r: var R; bodyLen: int): MetadataRevision =
   ## Parses a VorbisComment block. Unknown keys kept verbatim.
-  let start = r.pos
+  let start = r.getPos()
   template need(n: int) =
-    if r.pos + n > start + bodyLen:
+    if r.getPos() + n > start + bodyLen:
       raise decodeError("flac: truncated vorbis comment")
   need(8)
   let vendorLen = r.readU32Le().int
@@ -136,18 +137,21 @@ proc fillStream(header: var FrameHeader; info: StreamInfo) =
   if header.bitsPerSample.isNone:
     header.bitsPerSample = some(info.bitsPerSample)
 
-proc headerAt(data: seq[uint8]; q: int): Option[FrameHeader] =
+proc headerAt(base: ptr UncheckedArray[uint8]; len: int;
+    q: int): Option[FrameHeader] =
   ## Sync + parse + CRC8 at `q`, no strict checks. None on any failure.
-  if q + 1 >= data.len:
+  ## Pointer-based so the owning and mapped opens share one implementation.
+  if q + 1 >= len:
     return none(FrameHeader)
-  if data[q] != 0xff'u8 or (data[q + 1] and 0xfc'u8) != 0xf8'u8:
+  if base[q] != 0xff'u8 or (base[q + 1] and 0xfc'u8) != 0xf8'u8:
     return none(FrameHeader)
-  if data.len - q < FlacMinFrameHeaderSize:
+  if len - q < FlacMinFrameHeaderSize:
     return none(FrameHeader)
-  if not isLikelyFrameHeader(data.toOpenArray(q,
-      min(q + FlacMaxFrameHeaderSize - 1, data.len - 1))):
+  if not isLikelyFrameHeader(toOpenArray(base, q,
+      min(q + FlacMaxFrameHeaderSize - 1, len - 1))):
     return none(FrameHeader)
-  var r = newReader(data.toOpenArray(q, data.len - 1))
+  var r = ViewReader(base: cast[ptr UncheckedArray[uint8]](
+    cast[int](base) +% q), len: len - q, pos: 0)
   var sync = 0'u16
   try:
     sync = syncFrame(r)
@@ -158,12 +162,13 @@ proc headerAt(data: seq[uint8]; q: int): Option[FrameHeader] =
   except AudioError:
     none(FrameHeader)
 
-proc verifyFooter(data: seq[uint8]; s, e: int): bool =
+proc verifyFooter(base: ptr UncheckedArray[uint8]; len: int;
+    s, e: int): bool =
   ## Checks the BE CRC16 footer over bytes [s, e).
   if e - s < 4:
     return false
-  let foot = (data[e - 2].uint16 shl 8) or data[e - 1].uint16
-  crc16Ansi(data.toOpenArray(s, e - 3)) == foot
+  let foot = (base[e - 2].uint16 shl 8) or base[e - 1].uint16
+  crc16Ansi(toOpenArray(base, s, e - 3)) == foot
 
 proc calcTs(info: StreamInfo; header: FrameHeader): uint64 =
   let fixed = info.blockLenMin == info.blockLenMax
@@ -205,7 +210,8 @@ proc strictCheck(info: StreamInfo; header: FrameHeader;
     else: 2
   nch == info.channels.channelCount()
 
-proc buildIndex(data: seq[uint8]; info: StreamInfo;
+proc buildIndex(base: ptr UncheckedArray[uint8]; len: int;
+    info: StreamInfo;
     start: int): tuple[index: seq[FlacFrameIndex], lastSeq: uint64,
     hasLast: bool] =
   ## Eager frame table with full integrity verification.
@@ -215,18 +221,18 @@ proc buildIndex(data: seq[uint8]; info: StreamInfo;
   var hasLast = false
   # Minimal header for the strict check (rate/bps from StreamInfo so the
   # check matches the reference, which fills them in first).
-  while pos < data.len:
+  while pos < len:
     # Scan for the sync word.
     var syncAt = -1
     var p = pos
-    while p + 1 < data.len:
-      if data[p] == 0xff'u8 and (data[p + 1] and 0xfc'u8) == 0xf8'u8:
+    while p + 1 < len:
+      if base[p] == 0xff'u8 and (base[p + 1] and 0xfc'u8) == 0xf8'u8:
         syncAt = p
         break
       inc p
     if syncAt < 0:
       break
-    let h0 = headerAt(data, syncAt)
+    let h0 = headerAt(base, len, syncAt)
     if h0.isNone:
       pos = syncAt + 1
       continue
@@ -239,22 +245,22 @@ proc buildIndex(data: seq[uint8]; info: StreamInfo;
     # A footer mismatch means a false boundary: keep scanning.
     var frameEnd = -1
     var q = syncAt + 2
-    while q + 1 < data.len:
-      if data[q] == 0xff'u8 and (data[q + 1] and 0xfc'u8) == 0xf8'u8:
-        let h1 = headerAt(data, q)
+    while q + 1 < len:
+      if base[q] == 0xff'u8 and (base[q + 1] and 0xfc'u8) == 0xf8'u8:
+        let h1 = headerAt(base, len, q)
         if h1.isSome:
           var hh = h1.get
           fillStream(hh, info)
           if seqOf(hh) > seqOf(hdr) and
               strictCheck(info, hh, seqOf(hdr), true) and
-              verifyFooter(data, syncAt, q):
+              verifyFooter(base, len, syncAt, q):
             frameEnd = q
             break
       inc q
     if frameEnd < 0:
       # Last frame runs to end of data.
-      frameEnd = data.len
-      if not verifyFooter(data, syncAt, frameEnd):
+      frameEnd = len
+      if not verifyFooter(base, len, syncAt, frameEnd):
         raise decodeError("flac: frame footer CRC mismatch")
     let ts = calcTs(info, hdr)
     index.add(FlacFrameIndex(offset: syncAt, ts: ts,
@@ -266,9 +272,20 @@ proc buildIndex(data: seq[uint8]; info: StreamInfo;
 
 # ---------------------------------------------------------- demuxer ------
 
-proc openFlac*(data: seq[uint8]): FlacReader =
-  ## Opens a complete native FLAC stream held in memory.
-  var r = newReader(data)
+type
+  FlacMetadata* = object
+    ## Result of the shared metadata scan: codec params plus the audio
+    ## window start. `audioStart` is an absolute file offset.
+    track*: Track
+    params*: AudioCodecParameters
+    info*: StreamInfo
+    metaLog*: MetadataLog
+    audioStart*: int
+
+proc scanFlacMetadata[R](r: var R): FlacMetadata =
+  ## Metadata blocks up to the audio start. Shared by the owning and
+  ## mapped opens; `R` is `Reader` or `ViewReader`. Bodies are small
+  ## (StreamInfo is 34 bytes), so the copies stay bounded.
   if r.remaining() < 4 or r.readFourCc() != [0x66'u8, 0x4c, 0x61, 0x43]:
     raise unsupportedError("flac: missing flac stream marker")
   var trackOpt: Option[Track] = none(Track)
@@ -324,14 +341,25 @@ proc openFlac*(data: seq[uint8]): FlacReader =
   if info.nSamples.isSome:
     track.numFrames = info.nSamples
     track.duration = some(newDuration(info.nSamples.get))
-  let audioStart = r.pos
-  let (index, _, _) = buildIndex(data, info, audioStart)
+  FlacMetadata(track: track, params: params, info: info,
+    metaLog: metaLog, audioStart: r.getPos())
+
+proc openFlac*(data: seq[uint8]): FlacReader =
+  ## Opens a complete native FLAC stream held in memory.
+  var r = newReader(data)
+  let m = scanFlacMetadata(r)
+  let base =
+    if data.len > 0:
+      cast[ptr UncheckedArray[uint8]](unsafeAddr data[0])
+    else:
+      nil
+  let (index, _, _) = buildIndex(base, data.len, m.info, m.audioStart)
   if index.len == 0:
     raise decodeError("flac: no audio frames")
-  result = FlacReader(r: r, tracks: @[track], params: params, info: info,
-    index: index, audioStart: audioStart, audioEnd: data.len,
-    metadata: metaLog)
-  result.r.pos = audioStart
+  result = FlacReader(r: r, tracks: @[m.track], params: m.params,
+    info: m.info, index: index, audioStart: m.audioStart,
+    audioEnd: data.len, metadata: m.metaLog)
+  result.r.pos = m.audioStart
 
 proc trackCount*(w: FlacReader): int {.inline.} = w.tracks.len
 
@@ -357,8 +385,9 @@ proc nextPacket*(w: FlacReader): Option[Packet] =
   some(newPacket(0, newTimestamp(cast[int64](fr.ts)),
     newDuration(fr.samples.uint64), w.r.data[start ..< stop]))
 
-proc seek*(w: FlacReader; to: SeekTo): SeekedTo =
-  let track = w.tracks[0]
+proc flacSeekPos*(track: Track; index: seq[FlacFrameIndex];
+    to: SeekTo): tuple[pos: int, posIdx: int, seeked: SeekedTo] =
+  ## Shared binary-search seek over the frame index.
   var req: Timestamp
   if to.byTime:
     if track.timeBase.isNone:
@@ -379,19 +408,108 @@ proc seek*(w: FlacReader; to: SeekTo): SeekedTo =
   # Binary search the last frame with ts <= req.
   var found = 0
   var lo = 0
-  var hi = w.index.len - 1
+  var hi = index.len - 1
   while lo <= hi:
     let mid = (lo + hi) div 2
-    if cast[int64](w.index[mid].ts) <= req.get:
+    if cast[int64](index[mid].ts) <= req.get:
       found = mid
       lo = mid + 1
     else:
       hi = mid - 1
-  let fr = w.index[found]
-  w.r.pos = fr.offset
-  w.posIdx = found
-  SeekedTo(trackId: 0, requiredTs: req,
-    actualTs: newTimestamp(cast[int64](fr.ts)))
+  let fr = index[found]
+  (fr.offset, found, SeekedTo(trackId: 0, requiredTs: req,
+    actualTs: newTimestamp(cast[int64](fr.ts))))
+
+proc seek*(w: FlacReader; to: SeekTo): SeekedTo =
+  let (pos, posIdx, seeked) = flacSeekPos(w.tracks[0], w.index, to)
+  w.r.pos = pos
+  w.posIdx = posIdx
+  seeked
+
+# -------------------------------------------------- mapped demuxer ---
+
+type
+  FlacMappedReader* = ref object
+    ## Streaming FLAC demuxer over a memory-mapped file. The eager frame
+    ## index stores offsets only; packets are windows into the mapping
+    ## (`PacketView`), so no file-sized heap copy exists. Keep the reader
+    ## open while any view is in use; `close` unmaps.
+    src*: MappedSource
+    tracks*: seq[Track]
+    params*: AudioCodecParameters
+    info*: StreamInfo
+    index*: seq[FlacFrameIndex]
+    audioStart*: int
+    audioEnd*: int
+    metadata*: MetadataLog
+    pos*: int
+    posIdx*: int
+
+proc openFlacMapped*(path: string): FlacMappedReader =
+  ## Maps `path` and builds the verified frame index. Packet windows stay
+  ## zero-copy.
+  let src = openMappedSource(path)
+  try:
+    var vr = viewReader(src, 0, src.mappedLen)
+    let m = scanFlacMetadata(vr)
+    let base = cast[ptr UncheckedArray[uint8]](src.mf.mem)
+    let (index, _, _) = buildIndex(base, src.mappedLen, m.info,
+      m.audioStart)
+    if index.len == 0:
+      raise decodeError("flac: no audio frames")
+    result = FlacMappedReader(src: src, tracks: @[m.track],
+      params: m.params, info: m.info, index: index,
+      audioStart: m.audioStart, audioEnd: src.mappedLen,
+      metadata: m.metaLog, pos: m.audioStart, posIdx: 0)
+  except AudioError:
+    src.close()
+    raise
+
+proc close*(w: FlacMappedReader) =
+  ## Unmaps the file. Outstanding views become invalid.
+  if w != nil and w.src != nil:
+    w.src.close()
+
+proc trackCount*(w: FlacMappedReader): int {.inline.} = w.tracks.len
+
+proc mediaInfo*(w: FlacMappedReader): MediaInfo =
+  let t = w.tracks[0]
+  MediaInfo(timeBase: t.timeBase, duration: t.duration, startTs: t.startTs)
+
+proc numFrames*(w: FlacMappedReader): Option[uint64] = w.tracks[0].numFrames
+
+proc nextPacketView*(w: FlacMappedReader): Option[PacketView] =
+  ## Next frame as a mapping window. No bytes are copied; decode with
+  ## `decodePacketView` (FLAC) or `packetSeq` for compat.
+  while w.posIdx < w.index.len and w.index[w.posIdx].offset < w.pos:
+    inc w.posIdx
+  if w.posIdx >= w.index.len or w.index[w.posIdx].offset != w.pos:
+    return none(PacketView)
+  let fr = w.index[w.posIdx]
+  let start = fr.offset
+  let stop =
+    if w.posIdx + 1 < w.index.len: w.index[w.posIdx + 1].offset
+    else: w.audioEnd
+  w.pos = stop
+  inc w.posIdx
+  some(PacketView(trackId: 0, pts: newTimestamp(cast[int64](fr.ts)),
+    dts: newTimestamp(cast[int64](fr.ts)),
+    dur: newDuration(fr.samples.uint64), trimStart: ZeroDuration,
+    trimEnd: ZeroDuration, src: w.src, off: start, len: stop - start))
+
+proc nextPacket*(w: FlacMappedReader): Option[Packet] =
+  ## Owning-copy packets (same timing as `nextPacketView`, bounded copy).
+  let v = w.nextPacketView()
+  if v.isNone:
+    return none(Packet)
+  let pv = v.get
+  some(newPacket(pv.trackId, pv.pts, pv.dur, pv.packetSeq()))
+
+proc seek*(w: FlacMappedReader; to: SeekTo): SeekedTo =
+  let (pos, posIdx, seeked) = flacSeekPos(w.tracks[0], w.index, to)
+  w.pos = pos
+  w.posIdx = posIdx
+  seeked
 
 # ------------------------------------------------------------ muxer ------
 

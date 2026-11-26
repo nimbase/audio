@@ -27,6 +27,7 @@ import ./../codecs
 import ./../errors
 import ./../io
 import ./../packet
+import ./../source
 
 # ------------------------------------------------------------ StreamInfo ---
 
@@ -141,7 +142,7 @@ const
   FlacMaxFrameHeaderSize* = 16
   FlacMaxFrameSize* = 16 * 1024 * 1024
 
-proc syncFrame*(r: var Reader): uint16 =
+proc syncFrame*[R](r: var R): uint16 =
   ## Scans for the 14-bit sync code (`0xFFF8` masked), returning the full
   ## 16-bit word (low bit = blocking strategy).
   var sync = 0'u16
@@ -149,7 +150,7 @@ proc syncFrame*(r: var Reader): uint16 =
     sync = (sync shl 8) or r.readByte().uint16
   sync
 
-proc readFrameHeader*(r: var Reader; sync: uint16): FrameHeader =
+proc readFrameHeader*[R](r: var R; sync: uint16): FrameHeader =
   ## Parses and CRC8-verifies a frame header (sync word included in CRC).
   var crcBytes: seq[uint8] = @[cast[uint8](sync shr 8), cast[uint8](sync)]
   template takeByte(): uint8 =
@@ -367,7 +368,7 @@ proc decorrelateMidSide(mid: var openArray[int32]; side: var openArray[int32]) =
     mid[i] = (mm +% s) shr 1
     side[i] = (mm -% s) shr 1
 
-proc decodeRicePartition(bs: var BitReader; paramWidth: int;
+proc decodeRicePartition[B](bs: var B; paramWidth: int;
     buf: var openArray[int32]; off, count: int) =
   let riceParam = bs.readBits(paramWidth).int
   if riceParam < (1 shl paramWidth) - 1:
@@ -380,7 +381,7 @@ proc decodeRicePartition(bs: var BitReader; paramWidth: int;
     for i in 0 ..< count:
       buf[off + i] = signExtend(bs.readBits(residualBits), residualBits)
 
-proc decodeResidual(bs: var BitReader; nPrelude: int;
+proc decodeResidual[B](bs: var B; nPrelude: int;
     buf: var openArray[int32]) =
   let methodEnc = bs.readBits(2)
   let paramWidth =
@@ -403,12 +404,12 @@ proc decodeResidual(bs: var BitReader; nPrelude: int;
     bs.decodeRicePartition(paramWidth, buf, pos, n)
     pos += n
 
-proc decodeConstant(bs: var BitReader; bps: int; buf: var openArray[int32]) =
+proc decodeConstant[B](bs: var B; bps: int; buf: var openArray[int32]) =
   let v = signExtend(bs.readBits(bps), bps)
   for s in buf.mitems:
     s = v
 
-proc decodeVerbatim(bs: var BitReader; bps: int; buf: var openArray[int32]) =
+proc decodeVerbatim[B](bs: var B; bps: int; buf: var openArray[int32]) =
   for s in buf.mitems:
     s = signExtend(bs.readBits(bps), bps)
 
@@ -457,7 +458,7 @@ proc lpcPredict(order: int; coeffs: openArray[int32]; shift: int;
       predicted = predicted +% coeffs[j].int64 *% buf[i - N + j].int64
     buf[i] = buf[i] +% cast[int32](predicted shr shift)
 
-proc decodeFixedLinear(bs: var BitReader; bps, order: int;
+proc decodeFixedLinear[B](bs: var B; bps, order: int;
     buf: var openArray[int32]) =
   if order > buf.len:
     raise decodeError("flac: fixed predictor order is greater than the block size")
@@ -466,7 +467,7 @@ proc decodeFixedLinear(bs: var BitReader; bps, order: int;
   bs.decodeResidual(order, buf)
   fixedPredict(order, buf)
 
-proc decodeLinear(bs: var BitReader; bps, order: int;
+proc decodeLinear[B](bs: var B; bps, order: int;
     buf: var openArray[int32]) =
   if order > buf.len:
     raise decodeError("flac: predictor order is greater than the block size")
@@ -485,7 +486,7 @@ proc decodeLinear(bs: var BitReader; bps, order: int;
   bs.decodeResidual(order, buf)
   lpcPredict(order, coeffs, qlpShift.int, buf)
 
-proc decodeSubframe*(bs: var BitReader; frameBps: int;
+proc decodeSubframe*[B](bs: var B; frameBps: int;
     buf: var openArray[int32]) =
   if bs.readBit():
     raise decodeError("flac: subframe padding is not 0")
@@ -557,8 +558,9 @@ proc newFlacDecoder*(params: AudioCodecParameters;
     verify: opts.verify)
   result.validator.initValidator()
 
-proc decodeFrames(d: FlacDecoder; data: seq[uint8]) =
-  var r = newReader(data)
+proc decodeFramesHead[R](d: FlacDecoder;
+    r: var R): tuple[header: FrameHeader, bps: uint32, n: int] =
+  ## Sync + header parse, shared by the owning and zero-copy paths.
   let sync = syncFrame(r)
   let header = readFrameHeader(r, sync)
   var bps =
@@ -572,7 +574,11 @@ proc decodeFrames(d: FlacDecoder; data: seq[uint8]) =
     raise decodeError("flac: allocation would overflow buffer")
   d.buf.s32.renderWith(n, i):
     discard i
-  var bs = newBitReader(r.readBytes(r.remaining()))
+  (header, bps, n)
+
+proc decodeFramesBody[B](d: FlacDecoder; header: FrameHeader; bps: uint32;
+    n: int; bs: var B) =
+  ## Subframe decode over any MSB-first bit cursor.
   case header.assignment.kind
   of caIndependent:
     let nch = header.assignment.channels.int
@@ -609,6 +615,30 @@ proc decodeFrames(d: FlacDecoder; data: seq[uint8]) =
       for i in 0 ..< n:
         d.buf.s32.planes[p][i] = d.buf.s32.planes[p][i] shl shift
   # The footer CRC is verified by the demuxer during indexing.
+
+proc decodeFrames(d: FlacDecoder; data: seq[uint8]) =
+  ## Owning decode: the bit reader copies the packet tail (as before).
+  var r = newReader(data)
+  let (header, bps, n) = d.decodeFramesHead(r)
+  var bs = newBitReader(r.readBytes(r.remaining()))
+  d.decodeFramesBody(header, bps, n, bs)
+
+proc decodeFlacView*(d: FlacDecoder; src: MappedSource; off, len: int) =
+  ## Zero-copy decode straight from a mapping window. No packet or bit
+  ## reader copy; output still reuses the decoder's internal buffer.
+  var vr = viewReader(src, off, len)
+  let (header, bps, n) = d.decodeFramesHead(vr)
+  var vbs = vr.restBits()
+  try:
+    d.decodeFramesBody(header, bps, n, vbs)
+  except AudioError as e:
+    d.buf.clearSamples()
+    raise e
+
+proc decodePacketView*(d: FlacDecoder; v: PacketView): AudioSamples =
+  ## View-based `decodePacket`: identical output, no packet copy.
+  d.decodeFlacView(v.src, v.off, v.len)
+  d.buf
 
 method codecParams*(d: FlacDecoder): AudioCodecParameters = d.params
 

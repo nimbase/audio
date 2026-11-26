@@ -243,6 +243,9 @@ while true:
 reader.close()
 ```
 
+FLAC mirrors it: `openFlacMapped` + `newFlacDecoder` +
+`decodePacketView`, with MD5 verification intact.
+
 ### Probe + seek
 
 ```nim
