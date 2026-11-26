@@ -623,10 +623,9 @@ proc decodeFrames(d: FlacDecoder; data: seq[uint8]) =
   var bs = newBitReader(r.readBytes(r.remaining()))
   d.decodeFramesBody(header, bps, n, bs)
 
-proc decodeFlacView*(d: FlacDecoder; src: MappedSource; off, len: int) =
-  ## Zero-copy decode straight from a mapping window. No packet or bit
-  ## reader copy; output still reuses the decoder's internal buffer.
-  var vr = viewReader(src, off, len)
+proc decodeFlacWin*(d: FlacDecoder; win: ByteWindow) =
+  ## Zero-copy decode straight from a byte window (mapping or pool).
+  var vr = viewReaderOf(win)
   let (header, bps, n) = d.decodeFramesHead(vr)
   var vbs = vr.restBits()
   try:
@@ -635,9 +634,13 @@ proc decodeFlacView*(d: FlacDecoder; src: MappedSource; off, len: int) =
     d.buf.clearSamples()
     raise e
 
+proc decodeFlacView*(d: FlacDecoder; src: MappedSource; off, len: int) =
+  ## Zero-copy decode straight from a mapping window.
+  d.decodeFlacWin(byteWindow(src, off, len))
+
 proc decodePacketView*(d: FlacDecoder; v: PacketView): AudioSamples =
   ## View-based `decodePacket`: identical output, no packet copy.
-  d.decodeFlacView(v.src, v.off, v.len)
+  d.decodeFlacWin(v.win)
   d.buf
 
 method codecParams*(d: FlacDecoder): AudioCodecParameters = d.params

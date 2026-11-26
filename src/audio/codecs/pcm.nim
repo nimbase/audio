@@ -300,16 +300,20 @@ proc decodeFrames(d: PcmDecoder; data: seq[uint8]) =
   var r = newReader(data)
   d.decodeFramesFrom(r, data.len div d.bytesPerFrame)
 
-proc decodePcmView*(d: PcmDecoder; src: MappedSource; off, len: int) =
-  ## Zero-copy decode straight from a mapping window. No packet `seq` is
-  ## allocated; output still reuses the decoder's internal buffer.
+proc decodePcmWin*(d: PcmDecoder; win: ByteWindow) =
+  ## Zero-copy decode straight from a byte window (mapping or pool).
+  ## No packet copy; output still reuses the decoder's internal buffer.
   checkDecode(d.bytesPerFrame > 0, "pcm: invalid frame size")
-  var vr = viewReader(src, off, len)
+  var vr = viewReaderOf(win)
   try:
-    d.decodeFramesFrom(vr, len div d.bytesPerFrame)
+    d.decodeFramesFrom(vr, win.len div d.bytesPerFrame)
   except AudioError as e:
     d.buf.clearSamples()
     raise e
+
+proc decodePcmView*(d: PcmDecoder; src: MappedSource; off, len: int) =
+  ## Zero-copy decode straight from a mapping window.
+  d.decodePcmWin(byteWindow(src, off, len))
 
 method decodePacket*(d: PcmDecoder; pkt: Packet): AudioSamples =
   try:
@@ -321,7 +325,7 @@ method decodePacket*(d: PcmDecoder; pkt: Packet): AudioSamples =
 
 proc decodePacketView*(d: PcmDecoder; v: PacketView): AudioSamples =
   ## View-based `decodePacket`: identical output, no packet copy.
-  d.decodePcmView(v.src, v.off, v.len)
+  d.decodePcmWin(v.win)
   d.buf
 
 method lastDecoded*(d: PcmDecoder): AudioSamples = d.buf

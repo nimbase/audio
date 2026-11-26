@@ -577,7 +577,7 @@ proc nextPacketView*(w: MpaMappedReader): Option[PacketView] =
   some(PacketView(trackId: 0, pts: newTimestamp(p.pts),
     dts: newTimestamp(p.pts), dur: newDuration(p.dur),
     trimStart: newDuration(p.trimStart), trimEnd: newDuration(p.trimEnd),
-    src: w.src, off: p.start, len: p.stop - p.start))
+    win: byteWindow(w.src, p.start, p.stop - p.start), owner: w.src))
 
 proc nextPacket*(w: MpaMappedReader): Option[Packet] =
   ## Owning-copy packets (same timing as `nextPacketView`, bounded copy).

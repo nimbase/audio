@@ -907,7 +907,8 @@ proc nextPacketView*(w: Mp4MappedReader): Option[PacketView] =
   some(PacketView(trackId: w.data[p.trackIdx].track.id,
     pts: newTimestamp(p.pts), dts: newTimestamp(p.pts),
     dur: newDuration(p.dur), trimStart: ZeroDuration,
-    trimEnd: ZeroDuration, src: w.src, off: s.pos, len: s.size))
+    trimEnd: ZeroDuration, win: byteWindow(w.src, s.pos, s.size),
+    owner: w.src))
 
 proc nextPacket*(w: Mp4MappedReader): Option[Packet] =
   ## Owning-copy packets (same timing as `nextPacketView`, bounded copy).

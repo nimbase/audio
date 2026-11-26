@@ -495,7 +495,8 @@ proc nextPacketView*(w: FlacMappedReader): Option[PacketView] =
   some(PacketView(trackId: 0, pts: newTimestamp(cast[int64](fr.ts)),
     dts: newTimestamp(cast[int64](fr.ts)),
     dur: newDuration(fr.samples.uint64), trimStart: ZeroDuration,
-    trimEnd: ZeroDuration, src: w.src, off: start, len: stop - start))
+    trimEnd: ZeroDuration, win: byteWindow(w.src, start, stop - start),
+    owner: w.src))
 
 proc nextPacket*(w: FlacMappedReader): Option[Packet] =
   ## Owning-copy packets (same timing as `nextPacketView`, bounded copy).

@@ -492,12 +492,15 @@ proc decodeAlacPacket(d: AlacDecoder; data: seq[uint8]) =
   var bs = newLtrBitReader(data)
   d.decodeAlacData(bs)
 
-proc decodeAlacView*(d: AlacDecoder; src: MappedSource; off, len: int) =
-  ## Zero-copy decode straight from a mapping window. No packet or bit
-  ## reader copy; output still reuses the decoder's internal buffer.
-  var vr = viewReader(src, off, len)
+proc decodeAlacWin*(d: AlacDecoder; win: ByteWindow) =
+  ## Zero-copy decode straight from a byte window (mapping or pool).
+  var vr = viewReaderOf(win)
   var vbs = vr.restLtr()
   d.decodeAlacData(vbs)
+
+proc decodeAlacView*(d: AlacDecoder; src: MappedSource; off, len: int) =
+  ## Zero-copy decode straight from a mapping window.
+  d.decodeAlacWin(byteWindow(src, off, len))
 
 proc applyGaplessTrims(d: AlacDecoder; trimStart, trimEnd: Duration) =
   if d.opts.gapless and d.buf.framesOf() > 0:
@@ -533,7 +536,7 @@ proc decodePacketView*(d: AlacDecoder; v: PacketView): AudioSamples =
   ## View-based `decodePacket`: identical output (incl. gapless trims),
   ## no packet copy.
   try:
-    d.decodeAlacView(v.src, v.off, v.len)
+    d.decodeAlacWin(v.win)
   except AudioError as e:
     d.buf.clearSamples()
     raise e

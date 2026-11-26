@@ -1033,3 +1033,110 @@ proc readVlc*(b: var RtlBitReader; t: VlcTable): tuple[value: uint32,
       b.cache = b.cache shr e.codeLen
       b.left -= e.codeLen
       return (e.value, e.codeLen)
+
+# ------------------------------------------------------ ViewRtlBitReader ---
+
+type
+  ViewRtlBitReader* = object
+    ## LSB-first bit reader over borrowed bytes (mapped Vorbis packets).
+    ## Same API as `RtlBitReader` but zero-copy: the backing (a mapping
+    ## window or pool window) must outlive every view.
+    base*: ptr UncheckedArray[uint8]
+    len*: int
+    pos*: int
+    cache*: uint64
+    left*: int
+
+proc bitsLeft*(b: ViewRtlBitReader): int {.inline.} =
+  (b.len - b.pos) * 8 + b.left
+
+proc rtlRefill(b: var ViewRtlBitReader; maxBytes: int) =
+  ## Appends bytes LSB-first, up to `maxBytes` and up to 64 cached bits
+  ## total. Raises only if no bits are available at all.
+  let capacity = (64 - b.left) div 8
+  var want = min(maxBytes, capacity)
+  var n = 0
+  while n < want and b.pos < b.len:
+    b.cache = b.cache or (b.base[b.pos].uint64 shl b.left)
+    inc b.pos
+    b.left += 8
+    inc n
+  if n == 0 and b.left == 0:
+    raise newException(EndOfStream, "vorbis: end of bitstream")
+
+proc readRtlBits*(b: var ViewRtlBitReader; n: int): uint32 =
+  ## Reads `n <= 32` bits LSB-first.
+  if n == 0:
+    return 0
+  checkDecode(n > 0 and n <= 32, "bit reader width out of range")
+  var need = n
+  var res = 0'u64
+  var shift = 0
+  while need > 0:
+    if b.left == 0:
+      b.rtlRefill(8)
+    let take = min(need, b.left)
+    res = res or ((b.cache and ((1'u64 shl take) - 1)) shl shift)
+    b.cache = rtlShr(b.cache, take)
+    b.left -= take
+    need -= take
+    shift += take
+  cast[uint32](res)
+
+proc readRtlBits64*(b: var ViewRtlBitReader; n: int): uint64 =
+  if n == 0:
+    return 0
+  checkDecode(n > 0 and n <= 64, "bit reader width out of range")
+  var need = n
+  var res = 0'u64
+  var shift = 0
+  while need > 0:
+    if b.left == 0:
+      b.rtlRefill(8)
+    let take = min(need, b.left)
+    let mask =
+      if take >= 64: high(uint64)
+      else: (1'u64 shl take) - 1
+    res = res or ((b.cache and mask) shl shift)
+    b.cache = rtlShr(b.cache, take)
+    b.left -= take
+    need -= take
+    shift += take
+  res
+
+proc readRtlBool*(b: var ViewRtlBitReader): bool {.inline.} =
+  b.readRtlBits(1) == 1
+
+proc readRtlSigned*(b: var ViewRtlBitReader; n: int): int32 =
+  signExtend(b.readRtlBits(n), n)
+
+proc ignoreRtlBits*(b: var ViewRtlBitReader; n: int) =
+  var need = n
+  while need > 0:
+    if b.left == 0:
+      b.rtlRefill(8)
+    let take = min(need, b.left)
+    b.cache = rtlShr(b.cache, take)
+    b.left -= take
+    need -= take
+
+proc readVlc*(b: var ViewRtlBitReader; t: VlcTable): tuple[value: uint32,
+    codeLen: int] =
+  ## Walks the VLC table LSB-first.
+  if b.left < t.maxCodeLen:
+    b.rtlRefill(8)
+  var bits = b.cache
+  let mask = (1 shl t.bitsPerBlock) - 1
+  var base = 0
+  while true:
+    let e = t.table[base + (bits and mask.uint64).int]
+    case e.kind
+    of veJump:
+      bits = bits shr t.bitsPerBlock
+      base = e.target
+    of veValue:
+      if e.codeLen > b.left:
+        raise newException(EndOfStream, "vorbis: end of bitstream")
+      b.cache = b.cache shr e.codeLen
+      b.left -= e.codeLen
+      return (e.value, e.codeLen)

@@ -2129,10 +2129,10 @@ proc decodeMpaFrame(d: MpaDecoder; data: seq[uint8]) =
   else:
     raise decodeError("mpa: invalid mpeg audio layer")
 
-proc decodeMpaView*(d: MpaDecoder; src: MappedSource; off, len: int) =
-  ## Zero-copy decode straight from a mapping window. No packet or bit
-  ## reader copy; reservoir bytes still copy into owned state (bounded).
-  var vr = viewReader(src, off, len)
+proc decodeMpaWin*(d: MpaDecoder; win: ByteWindow) =
+  ## Zero-copy decode straight from a byte window (mapping or pool).
+  ## No packet copy; reservoir bytes still copy into owned state (bounded).
+  var vr = viewReaderOf(win)
   if vr.remaining() < MpegHeaderLen:
     raise decodeError("mpa: truncated frame")
   let header = parseFrameHeader(vr.readU32Be())
@@ -2153,14 +2153,19 @@ proc decodeMpaView*(d: MpaDecoder; src: MappedSource; off, len: int) =
     of CodecMp3:
       if header.layer != Layer3:
         raise decodeError("mpa: invalid mpeg audio layer")
+      let main = subWindow(win, MpegHeaderLen, header.frameSize)
       decodeLayer3Data(header, vbs,
-        src.packetBytes(off + MpegHeaderLen, header.frameSize),
+        toOpenArray(main.base, 0, main.len - 1),
         d.state.l3, d.buf)
     else:
       raise decodeError("mpa: invalid mpeg audio layer")
   except AudioError:
     d.buf.clearSamples()
     raise
+
+proc decodeMpaView*(d: MpaDecoder; src: MappedSource; off, len: int) =
+  ## Zero-copy decode straight from a mapping window.
+  d.decodeMpaWin(byteWindow(src, off, len))
 
 proc applyGaplessTrims(d: MpaDecoder; trimStart, trimEnd: Duration) =
   if d.opts.gapless and d.buf.framesOf() > 0:
@@ -2193,7 +2198,7 @@ proc decodePacketView*(d: MpaDecoder; v: PacketView): AudioSamples =
   ## View-based `decodePacket`: identical output (incl. gapless trims),
   ## no packet copy.
   try:
-    d.decodeMpaView(v.src, v.off, v.len)
+    d.decodeMpaWin(v.win)
   except AudioError as e:
     d.buf.clearSamples()
     raise e

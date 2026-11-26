@@ -17,6 +17,7 @@ import ./../dsp
 import ./../errors
 import ./../io
 import ./../packet
+import ./../source
 import ./../units
 
 # --------------------------------------------------------------- common ---
@@ -229,10 +230,10 @@ proc readCodebook*(bs: var RtlBitReader): VorbisCodebook =
     clamp(maxCodeLen(codeLens), 4, 8), true)
   VorbisCodebook(table: table, dimensions: dimensions, vq: vq, hasVq: hasVq)
 
-proc readScalar*(cb: VorbisCodebook; bs: var RtlBitReader): uint32 =
+proc readScalar*[L](cb: VorbisCodebook; bs: var L): uint32 =
   bs.readVlc(cb.table).value
 
-proc readVq*(cb: VorbisCodebook; bs: var RtlBitReader): seq[float32] =
+proc readVq*[L](cb: VorbisCodebook; bs: var L): seq[float32] =
   if not cb.hasVq:
     raise decodeError("vorbis: not a vq codebook")
   let entry = bs.readVlc(cb.table).value.int
@@ -477,7 +478,7 @@ proc readFloor*(bs: var RtlBitReader; bs0exp, bs1exp: int;
 
 # ----------------------------------------------------- floor channel ---
 
-proc floor0ReadChannel(f: FloorObj; bs: var RtlBitReader;
+proc floor0ReadChannel[L](f: FloorObj; bs: var L;
     codebooks: openArray[VorbisCodebook]) =
   f.f0unused = true
   try:
@@ -632,7 +633,7 @@ proc floor1Step2(f: FloorObj; n: int; floor: var openArray[float32]) =
   if hx.int < n:
     renderLine(hx, hy, n.uint32, hy, n, floor)
 
-proc floor1ReadChannel(f: FloorObj; bs: var RtlBitReader;
+proc floor1ReadChannel[L](f: FloorObj; bs: var L;
     codebooks: openArray[VorbisCodebook]) =
   f.f1unused = true
   var isUsed = false
@@ -676,7 +677,7 @@ proc floor1ReadChannel(f: FloorObj; bs: var RtlBitReader;
       inc offset
   f.f1unused = false
 
-proc floorReadChannel*(f: FloorObj; bs: var RtlBitReader;
+proc floorReadChannel*[L](f: FloorObj; bs: var L;
     codebooks: openArray[VorbisCodebook]) =
   case f.kind
   of fk0: floor0ReadChannel(f, bs, codebooks)
@@ -753,7 +754,7 @@ proc readResidue*(bs: var RtlBitReader; rtype: int;
     maxCodebook: int): Residue =
   Residue(setup: readResidueSetup(bs, rtype, maxCodebook))
 
-proc readResiduePartition0(bs: var RtlBitReader; cb: VorbisCodebook;
+proc readResiduePartition0[L](bs: var L; cb: VorbisCodebook;
     buf: var openArray[float32]) =
   let step = buf.len div cb.dimensions
   for i in 0 ..< step:
@@ -763,7 +764,7 @@ proc readResiduePartition0(bs: var RtlBitReader; cb: VorbisCodebook;
       buf[k] = buf[k] + v
       k += step
 
-proc readResiduePartition1(bs: var RtlBitReader; cb: VorbisCodebook;
+proc readResiduePartition1[L](bs: var L; cb: VorbisCodebook;
     buf: var openArray[float32]) =
   let dim = cb.dimensions
   if dim == 2:
@@ -895,7 +896,7 @@ proc deinterleave2(res: var Residue; chIdx: openArray[int];
         inc o
         k += stride
 
-proc readResidueInnerType2(res: var Residue; bs: var RtlBitReader; bsExp: int;
+proc readResidueInnerType2[L](res: var Residue; bs: var L; bsExp: int;
     codebooks: openArray[VorbisCodebook]; chIdx: openArray[int];
     channels: var openArray[DspChannel]) =
   let classbook = codebooks[res.setup.classbook]
@@ -942,7 +943,7 @@ proc readResidueInnerType2(res: var Residue; bs: var RtlBitReader; bsExp: int;
             return
       partFirst += partsPerClassword
 
-proc readResidueInnerType01(res: var Residue; bs: var RtlBitReader; bsExp: int;
+proc readResidueInnerType01[L](res: var Residue; bs: var L; bsExp: int;
     codebooks: openArray[VorbisCodebook]; chIdx: openArray[int];
     channels: var openArray[DspChannel]) =
   let classbook = codebooks[res.setup.classbook]
@@ -1001,7 +1002,7 @@ proc readResidueInnerType01(res: var Residue; bs: var RtlBitReader; bsExp: int;
               return
       partFirst += partsPerClassword
 
-proc readResidueData*(res: var Residue; bs: var RtlBitReader; bsExp: int;
+proc readResidueData*[L](res: var Residue; bs: var L; bsExp: int;
     codebooks: openArray[VorbisCodebook]; chIdx: openArray[int];
     channels: var openArray[DspChannel]) =
   if res.setup.rtype == 2:
@@ -1433,8 +1434,8 @@ proc newVorbisDecoder*(params: AudioCodecParameters;
       windows: windows, prevBlockFlag: none(bool)),
     buf: newAudioSamples(sfF32, spec, 1 shl ident.bs1exp))
 
-proc decodeFrames(d: VorbisDecoder; data: seq[uint8]) =
-  var bs = newRtlBitReader(data)
+proc decodeFramesData[L](d: VorbisDecoder; bs: var L) =
+  ## Decode core over any LSB-first bit cursor (owning or view).
   if bs.readRtlBool():
     raise decodeError("vorbis: not an audio packet")
   let numModes = d.modes.len - 1
@@ -1530,6 +1531,31 @@ proc decodeFrames(d: VorbisDecoder; data: seq[uint8]) =
       d.buf.f32.clear()
   d.dsp.prevBlockFlag = some(mode.blockFlag)
 
+proc decodeFrames(d: VorbisDecoder; data: seq[uint8]) =
+  ## Owning entry: copies `data` into a cached reader (as before).
+  var bs = newRtlBitReader(data)
+  d.decodeFramesData(bs)
+
+proc decodeVorbisWin*(d: VorbisDecoder; win: ByteWindow) =
+  ## Zero-copy decode straight from a byte window (mapping or pool).
+  var vbs = restRtlOf(win)
+  d.decodeFramesData(vbs)
+
+proc decodeVorbisView*(d: VorbisDecoder; src: MappedSource; off,
+    len: int) =
+  ## Zero-copy decode straight from a mapping window.
+  d.decodeVorbisWin(byteWindow(src, off, len))
+
+proc applyGaplessTrims(d: VorbisDecoder; trimStart, trimEnd: Duration) =
+  if d.opts.gapless and d.buf.framesOf() > 0:
+    let total = d.buf.framesOf()
+    let dropFirst = min(trimStart.get.int, total)
+    let keep = total - dropFirst
+    let dropLast = min(trimEnd.get.int, keep)
+    if dropFirst > 0 or dropLast > 0:
+      d.buf.f32.shift(dropFirst)
+      d.buf.f32.truncate(d.buf.f32.numFrames - dropLast)
+
 method codecParams*(d: VorbisDecoder): AudioCodecParameters = d.params
 
 method reset*(d: VorbisDecoder) =
@@ -1545,14 +1571,21 @@ method decodePacket*(d: VorbisDecoder; pkt: Packet): AudioSamples =
     d.buf.clearSamples()
     raise decodeError("vorbis: invalid bitstream")
   # Apply packet trims (gapless) after a successful decode.
-  if d.opts.gapless and d.buf.framesOf() > 0:
-    let total = d.buf.framesOf()
-    let dropFirst = min(pkt.trimStart.get.int, total)
-    let keep = total - dropFirst
-    let dropLast = min(pkt.trimEnd.get.int, keep)
-    if dropFirst > 0 or dropLast > 0:
-      d.buf.f32.shift(dropFirst)
-      d.buf.f32.truncate(d.buf.f32.numFrames - dropLast)
+  d.applyGaplessTrims(pkt.trimStart, pkt.trimEnd)
+  d.buf
+
+proc decodePacketView*(d: VorbisDecoder; v: PacketView): AudioSamples =
+  ## View-based `decodePacket`: identical output (incl. gapless trims),
+  ## no packet copy.
+  try:
+    d.decodeVorbisWin(v.win)
+  except AudioError as e:
+    d.buf.clearSamples()
+    raise e
+  except IndexDefect, RangeDefect:
+    d.buf.clearSamples()
+    raise decodeError("vorbis: invalid bitstream")
+  d.applyGaplessTrims(v.trimStart, v.trimEnd)
   d.buf
 
 method lastDecoded*(d: VorbisDecoder): AudioSamples = d.buf

@@ -249,7 +249,9 @@ FLAC mirrors it: `openFlacMapped` + `newFlacDecoder` +
 and reservoir-backtrack seek included). AAC mirrors it too:
 `openMp4Mapped` + `newAacDecoder` + `decodePacketView`
 (ffmpeg parity past the 1024-sample priming). ALAC in MP4 mirrors it
-too via `openMp4Mapped` + `decodePacketView` (bit-exact).
+too via `openMp4Mapped` + `decodePacketView` (bit-exact). Vorbis in Ogg
+mirrors it too: `openOggMapped` + `newVorbisDecoder` + `decodePacketView`
+(ffmpeg parity; cross-page packets assemble into the pool).
 
 ### Probe + seek
 

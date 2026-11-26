@@ -1264,12 +1264,15 @@ proc decodeRawDataBlock(d: AacDecoder; data: seq[uint8]) =
   var bs = newLtrBitReader(data)
   d.decodeRawDataBlockData(bs)
 
-proc decodeAacView*(d: AacDecoder; src: MappedSource; off, len: int) =
-  ## Zero-copy decode straight from a mapping window. No packet or bit
-  ## reader copy; output still reuses the decoder's internal buffer.
-  var vr = viewReader(src, off, len)
+proc decodeAacWin*(d: AacDecoder; win: ByteWindow) =
+  ## Zero-copy decode straight from a byte window (mapping or pool).
+  var vr = viewReaderOf(win)
   var vbs = vr.restLtr()
   d.decodeRawDataBlockData(vbs)
+
+proc decodeAacView*(d: AacDecoder; src: MappedSource; off, len: int) =
+  ## Zero-copy decode straight from a mapping window.
+  d.decodeAacWin(byteWindow(src, off, len))
 
 method codecParams*(d: AacDecoder): AudioCodecParameters = d.params
 
@@ -1312,7 +1315,7 @@ proc decodePacketView*(d: AacDecoder; v: PacketView): AudioSamples =
   try:
     d.buf.f32.renderWith(1024, i):
       discard i
-    d.decodeAacView(v.src, v.off, v.len)
+    d.decodeAacWin(v.win)
   except AudioError as e:
     d.buf.clearSamples()
     raise e

@@ -337,12 +337,15 @@ proc decodeFrames(d: AdpcmDecoder; data: seq[uint8]; total: int) =
   var r = newReader(data)
   d.decodeFramesFrom(r, total)
 
+proc decodeAdpcmWin*(d: AdpcmDecoder; win: ByteWindow; total: int) =
+  ## Zero-copy decode straight from a byte window (mapping or pool).
+  var vr = viewReaderOf(win)
+  d.decodeFramesFrom(vr, total)
+
 proc decodeAdpcmView*(d: AdpcmDecoder; src: MappedSource; off, len,
     total: int) =
-  ## Zero-copy decode straight from a mapping window. No packet copy;
-  ## output still reuses the decoder's internal buffer.
-  var vr = viewReader(src, off, len)
-  d.decodeFramesFrom(vr, total)
+  ## Zero-copy decode straight from a mapping window.
+  d.decodeAdpcmWin(byteWindow(src, off, len), total)
 
 proc packetTotal*(d: AdpcmDecoder; blockDur: Duration): int =
   ## Block-aligned frame count for a packet duration.
@@ -356,7 +359,7 @@ proc packetTotal*(d: AdpcmDecoder; blockDur: Duration): int =
 proc decodePacketView*(d: AdpcmDecoder; v: PacketView): AudioSamples =
   ## View-based `decodePacket`: identical output, no packet copy.
   try:
-    d.decodeAdpcmView(v.src, v.off, v.len, d.packetTotal(v.blockDur()))
+    d.decodeAdpcmWin(v.win, d.packetTotal(v.blockDur()))
   except AudioError as e:
     d.buf.clearSamples()
     raise e

@@ -590,7 +590,7 @@ proc nextPacketView*(w: WavMappedReader): Option[PacketView] =
   let pts = newTimestamp(cast[int64](info.getNumFramesAt(rel)))
   let v = PacketView(trackId: 0, pts: pts, dts: pts, dur: newDuration(dur),
     trimStart: ZeroDuration, trimEnd: ZeroDuration,
-    src: w.src, off: w.pos, len: nBytes)
+    win: byteWindow(w.src, w.pos, nBytes), owner: w.src)
   w.pos += nBytes
   some(v)
 
