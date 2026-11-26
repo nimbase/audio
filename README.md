@@ -52,8 +52,9 @@ Codec support (`o` = decode, `w` = encode):
   inner-loop gain search, outer distortion loop, Huffman emit,
   reservoir scheduler, stereo/MS-joint (incl. auto picker),
   intensity-stereo (is-only, MS+IS, auto+IS; long/short/mixed,
-  MPEG-1/LSF), short/mixed blocks (forced + signal-driven auto), threshold-in-quiet
-  + quality presets, CBR/VBR, Xing/Info + LAME gapless tag, CRC-16,
+  MPEG-1/LSF), short/mixed blocks (forced + signal-driven auto),
+  threshold-in-quiet + signal-dependent Model-2 masking (Annex D
+  spreading, TMN/NMT, flatness tonality) + quality presets, CBR/VBR, Xing/Info + LAME gapless tag, CRC-16,
   all nine sample rates; decoded output verified sample-exact
   (gapless) and within black-box tolerance on fixtures
 - AAC: o — AAC-LC decoder (Huffman, TNS, KBD/sine IMDCT filterbank)

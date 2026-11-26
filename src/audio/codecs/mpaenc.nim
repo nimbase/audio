@@ -1619,6 +1619,139 @@ proc qualityOffsetDb*(q: Mp3QualityPreset): float64 {.inline.} =
   of qpStandard: 0.0
   of qpFast: 6.0
 
+proc qualityUsesModel2*(q: Mp3QualityPreset): bool {.inline.} =
+  ## Transparent/High/Standard arm the signal-dependent Model-2
+  ## thresholds; Fast stays on the signal-independent LTq vector.
+  q != qpFast
+
+# --------------------------------------- model 2 psychoacoustics ---
+
+const
+  Mp3Model2NmtDb* = 6.0 ## §C.1.5.3.2.1 Layer-III NMT (noise masking tone).
+  Mp3Model2TmnDb* = 29.0 ## §C.1.5.3.2.1 Layer-III TMN (tone masking noise).
+  Mp3Model2SpreadCutoffDb* = -100.0 ## §D.2.3 sprdngf cutoff (verbatim).
+
+proc model2SpreadTmpx*(iBark, jBark: float64): float64 {.inline.} =
+  ## §D.2.3 `tmpx = 1,05 * (j - i)` (verbatim).
+  1.05 * (jBark - iBark)
+
+proc model2SpreadXDb*(tmpx: float64): float64 {.inline.} =
+  ## §D.2.3 parabolic correction `x = 8*min((tmpx-0,5)^2-2*(tmpx-0,5),0)`
+  ## (verbatim; never positive, active only on the near-upward skirt).
+  let u = tmpx - 0.5
+  8.0 * min(u * u - 2.0 * u, 0.0)
+
+proc model2SpreadTmpyDb*(tmpx: float64): float64 {.inline.} =
+  ## §D.2.3 envelope `tmpy = 15,811389 + 7,5*(tmpx+0,474) -
+  ## 17,5*(1+(tmpx+0,474)^2)^0,5` (verbatim; 0 dB on the diagonal,
+  ## ≈ -10 dB/Bark upward, ≈ -25 dB/Bark downward).
+  let v = tmpx + 0.474
+  15.811389 + 7.5 * v - 17.5 * sqrt(1.0 + v * v)
+
+proc model2Spread*(iBark, jBark: float64): float64 {.inline.} =
+  ## Annex D §D.2.3 spreading factor (linear energy domain, verbatim
+  ## procedure): `tmpy < -100 → 0`, else `10^((x+tmpy)/10)`.
+  let tmpx = model2SpreadTmpx(iBark, jBark)
+  let tmpy = model2SpreadTmpyDb(tmpx)
+  if tmpy < Mp3Model2SpreadCutoffDb: 0.0
+  else: pow(10.0, (model2SpreadXDb(tmpx) + tmpy) / 10.0)
+
+proc barkOfHz*(hz: float64): float64 {.inline.} =
+  ## Schroeder Bark scale (standard Hz → Bark mapping).
+  13.0 * arctan(0.00076 * hz) + 3.5 * arctan((hz / 7500.0) * (hz / 7500.0))
+
+proc bandTonality*(band: openArray[float32]): float64 =
+  ## Spectral-flatness tonality in [0,1] (1 = pure tone). Documented
+  ## stand-in for the Annex D FFT-predictability cw classifier: the
+  ## encoder already holds the MDCT spectrum, so flatness of |xr| per
+  ## band drives the TMN/NMT interpolation instead of a second FFT.
+  if band.len == 0:
+    return 0.0
+  var arith = 0.0
+  var logSum = 0.0
+  for v in band:
+    let m = abs(v.float64)
+    arith += m
+    logSum += ln(m + 1e-12)
+  arith /= band.len.float64
+  if arith <= 0.0:
+    return 0.0
+  clamp(1.0 - exp(logSum / band.len.float64) / arith, 0.0, 1.0)
+
+proc model2LongThresholds*(xr: array[576, float32]; sampleRateHz: uint32;
+    version: MpegVersion; offsetDb = 0.0): array[21, float64] =
+  ## Signal-dependent masking thresholds per long band (Model-2-flavored):
+  ## per-band MDCT energy + flatness tonality → TMN/NMT mask level →
+  ## §D.2.3 Bark spreading (max-fold) → LTq floor → geometric-mean
+  ## anchor normalization (cf. reference `from_layer3_granule_with_offset_db`).
+  ##
+  ## Adaptations (documented): the masker analysis runs on the encoder's
+  ## own 21 long scalefactor bands instead of staged Annex D partition
+  ## tables (rate-agnostic: works at all nine sample rates, not just the
+  ## three staged Annex D rates); tonality comes from MDCT flatness, not
+  ## the 1024-point FFT predictability classifier. Masking offsets are
+  ## the verbatim §C.1.5.3.2.1 Layer-III values (TMN 29 dB, NMT 6 dB);
+  ## the preset `offsetDb` carries the §D.1 Step-3 sense (no additional
+  ## rate term: the preset values already encode it).
+  let idx = sampleRateIdxOf(sampleRateHz, version)
+  let starts = SfbLongBands[idx]
+  let lineToHz = sampleRateHz.float64 / 1152.0
+  var zb: array[21, float64]
+  var ltqDb: array[21, float64]
+  for sfb in 0 ..< 21:
+    let lo = max(starts[sfb].float64, 0.5)
+    let hi = max(starts[sfb + 1].float64 - 1.0, 0.5)
+    let hz = sqrt(lo * hi) * lineToHz
+    zb[sfb] = barkOfHz(hz)
+    ltqDb[sfb] = ltqDbAtHz(hz)
+  var maskDb: array[21, float64]
+  for sfb in 0 ..< 21:
+    let s = starts[sfb]
+    let e = min(starts[sfb + 1], 576)
+    let bw = max(e - s, 1).float64
+    var en = 0.0
+    for k in s ..< e:
+      en += xr[k].float64 * xr[k].float64
+    if en <= 1e-30:
+      maskDb[sfb] = -Inf
+    else:
+      let t = bandTonality(xr.toOpenArray(s, e - 1))
+      maskDb[sfb] = 10.0 * log10(en / bw) -
+        (t * Mp3Model2TmnDb + (1.0 - t) * Mp3Model2NmtDb)
+  var thrLin: array[21, float64]
+  for i in 0 ..< 21:
+    var m = -Inf
+    for j in 0 ..< 21:
+      if maskDb[j] == -Inf:
+        continue
+      let sp = model2Spread(zb[j], zb[i])
+      if sp <= 0.0:
+        continue
+      m = max(m, maskDb[j] + 10.0 * log10(sp))
+    thrLin[i] = pow(10.0, max(m, ltqDb[i]) / 10.0)
+  # Geometric-mean anchor: map the mean threshold to 1e6 translated by
+  # the preset offset (single common rescale preserves every per-band
+  # ratio Model 2 produced). Silent-shaped bands ride the LTq floor, so
+  # thrLin is always positive here.
+  let anchor = Mp3DefaultOuterThreshold * pow(10.0, offsetDb / 10.0)
+  var logSum = 0.0
+  var logCount = 0
+  var minPos = Inf
+  for sfb in 0 ..< 21:
+    let v = thrLin[sfb]
+    if v > 0.0:
+      logSum += ln(v)
+      inc logCount
+      minPos = min(minPos, v)
+  if logCount == 0:
+    for i in 0 ..< 21:
+      result[i] = anchor
+    return
+  let scale = anchor / exp(logSum / logCount.float64)
+  let floor = minPos * scale
+  for i in 0 ..< 21:
+    result[i] = if thrLin[i] > 0.0: thrLin[i] * scale else: floor
+
 # ---------------------------------------------------------------- crc ---
 
 proc crc16Bits*(bits: openArray[uint8]): uint16 =
@@ -1714,14 +1847,18 @@ proc buildInfoFrame*(header: FrameHeader; isXing: bool; frames, bytes: uint32;
   let siLen = hdr.sideInfoLen()
   let payload = buildXingPayload(isXing, frames, bytes, toc, quality)
   let slotStart = 4 + siLen
-  assert slotStart + payload.len <= frame.len
+  if slotStart + payload.len > frame.len:
+    raise unsupportedError(
+      "mp3enc: frame too small for Xing tag (raise bitrate or disable xing)")
   for i, b in payload:
     frame[slotStart + i] = b
   if gapless:
     # LAME extension at magic offset 120 (all four flags set).
     const lameStr = "LAMEoxav1"
     let at = slotStart + 120
-    assert at + 36 <= frame.len
+    if at + 36 > frame.len:
+      raise unsupportedError(
+        "mp3enc: frame too small for LAME gapless tag (raise bitrate or disable gapless)")
     for i, c in lameStr:
       frame[at + i] = c.uint8
     frame[at + 9] = 1 # CBR method byte
@@ -1782,6 +1919,7 @@ type
     jointAuto*: bool
     jointAutoThreshold*: float64
     intensityStart*: int ## 0 = off, else 1..20
+    useModel2*: bool ## signal-dependent Model-2 thresholds (needs outer loop)
     vbr*: bool
     vbrMinKbps*: int
     vbrMaxKbps*: int
@@ -1942,6 +2080,18 @@ proc outerXminBands*(e: Mp3Encoder): array[21, float64] =
       u[i] = e.opts.outerXmin
     u
 
+proc xminBandsFor*(e: Mp3Encoder; xr: array[576, float32]): array[21,
+    float64] =
+  ## Outer-loop thresholds for one granule-channel: signal-dependent
+  ## Model-2 masking when armed (computed on the spectrum actually
+  ## quantized, i.e. post-MS/IS), else the LTq/uniform path.
+  if e.opts.useModel2:
+    let off =
+      if e.opts.ltqOffsetDb.classify != fcNan: e.opts.ltqOffsetDb else: 0.0
+    model2LongThresholds(xr, e.sampleRateHz, e.version, off)
+  else:
+    e.outerXminBands()
+
 proc encodeGranuleStereo*(e: Mp3Encoder; gr: int; xrL, xrR: array[576,
     float32]; bt: Mp3BlockKind; mixed: bool; useMs: bool): tuple[
     q0, q1: array[576, int32]; g0, g1: GranuleChannel] =
@@ -1967,13 +2117,21 @@ proc encodeGranuleStereo*(e: Mp3Encoder; gr: int; xrL, xrR: array[576,
   let budget = e.perGcBitBudget()
   var q0, q1: array[576, int32]
   if e.opts.useOuterLoop:
-    let xb = e.outerXminBands()
-    let o0 = outerLoopSearchLong(a, c0, e.sampleRateHz, e.version, budget,
-      xb)
-    let o1 = outerLoopSearchLong(b, c1, e.sampleRateHz, e.version, budget,
-      xb)
-    q0 = o0.`is`
-    q1 = o1.`is`
+    if e.opts.useModel2:
+      let o0 = outerLoopSearchLong(a, c0, e.sampleRateHz, e.version, budget,
+        e.xminBandsFor(a))
+      let o1 = outerLoopSearchLong(b, c1, e.sampleRateHz, e.version, budget,
+        e.xminBandsFor(b))
+      q0 = o0.`is`
+      q1 = o1.`is`
+    else:
+      let xb = e.outerXminBands()
+      let o0 = outerLoopSearchLong(a, c0, e.sampleRateHz, e.version, budget,
+        xb)
+      let o1 = outerLoopSearchLong(b, c1, e.sampleRateHz, e.version, budget,
+        xb)
+      q0 = o0.`is`
+      q1 = o1.`is`
   else:
     let s0 = searchBitBudgetBanded(a, c0, e.sampleRateHz, e.version,
       budget)
@@ -2151,7 +2309,7 @@ proc assembleFrame*(e: Mp3Encoder; perChPcm: openArray[seq[float32]];
       var q: array[576, int32]
       if e.opts.useOuterLoop:
         let o = outerLoopSearchLong(xrPre[gr][0], c0, e.sampleRateHz,
-          e.version, budget, e.outerXminBands())
+          e.version, budget, e.xminBandsFor(xrPre[gr][0]))
         q = o.`is`
         if e.lsf:
           c0.scalefacCompress = Mp3OuterSfacCompressLsf
@@ -2185,11 +2343,12 @@ proc assembleFrame*(e: Mp3Encoder; perChPcm: openArray[seq[float32]];
       let budget = e.perGcBitBudget()
       var q0, q1: array[576, int32]
       if e.opts.useOuterLoop:
-        let xb = e.outerXminBands()
+        let xb0 = e.xminBandsFor(xrPre[gr][0])
+        let xb1 = e.xminBandsFor(xrPre[gr][1])
         let o0 = outerLoopSearchLong(xrPre[gr][0], c0, e.sampleRateHz,
-          e.version, budget, xb)
+          e.version, budget, xb0)
         let o1 = outerLoopSearchLong(xrPre[gr][1], c1, e.sampleRateHz,
-          e.version, budget, xb)
+          e.version, budget, xb1)
         q0 = o0.`is`
         q1 = o1.`is`
         if e.lsf:
@@ -2519,7 +2678,15 @@ proc newMp3EncoderQuality*(bitrateKbps: int; sampleRateHz: uint32;
   var o = defaultMp3EncoderOptions(bitrateKbps, sampleRateHz, mode)
   o.useOuterLoop = true
   o.ltqOffsetDb = qualityOffsetDb(q)
+  o.useModel2 = qualityUsesModel2(q)
   newMp3Encoder(o)
+
+proc enableModel2*(e: Mp3Encoder) =
+  ## Arm signal-dependent Model-2 thresholds (implies the outer loop,
+  ## which consumes them; mirrors the reference requirement that a
+  ## per-band xmin needs the outer loop enabled).
+  e.opts.useModel2 = true
+  e.opts.useOuterLoop = true
 
 proc newMp3EncoderJointMs*(bitrateKbps: int; sampleRateHz: uint32): Mp3Encoder =
   var o = defaultMp3EncoderOptions(bitrateKbps, sampleRateHz,

@@ -65,6 +65,21 @@ proc gaplessOpts(bitrateKbps: int; rate: uint32;
   result.xing = true
   result.gapless = true
 
+proc noiseStereo(n: int; amp: float; rate = 44_100;
+    seed = 0x12345678'u32): AudioSamples =
+  ## Deterministic white-noise stereo fixture (LCG, fixed seed): same
+  ## samples on every run, independent L/R channels.
+  let spec = newAudioSpec(rate.uint32, ChStereo)
+  result = newAudioSamples(sfS16, spec, n)
+  var s = seed
+  result.s16.renderWith(n, i):
+    s = s * 1664525'u32 + 1013904223'u32
+    let v0 = ((s shr 16) and 0xFFFF'u32).int32 - 32768
+    s = s * 1664525'u32 + 1013904223'u32
+    let v1 = ((s shr 16) and 0xFFFF'u32).int32 - 32768
+    result.s16.planes[0][i] = (v0.float * amp).int16
+    result.s16.planes[1][i] = (v1.float * amp).int16
+
 suite "mp3 encoder framing":
   test "header writer is parse inverse":
     let h = makeSilentHeader(128, 44_100, MpaMode(kind: mmStereo))
@@ -412,3 +427,135 @@ suite "mp3 encoder intensity":
       let got = decodeAll(encodeMp3Stream(src, o))
       check got[0].len == 22_050
       check psnrOf(src, got) > 15.0
+
+suite "mp3 encoder model2":
+  test "spreading kernel and tonality units":
+    initMpaTables()
+    check abs(model2Spread(5.0, 5.0) - 1.0) < 1e-6
+    check model2Spread(0.0, 20.0) == 0.0
+    check model2Spread(20.0, 0.0) == 0.0
+    check model2SpreadTmpyDb(model2SpreadTmpx(4.0, 4.0)) ==
+      model2SpreadTmpyDb(0.0)
+    check barkOfHz(100.0) < barkOfHz(1000.0)
+    check barkOfHz(1000.0) < barkOfHz(10000.0)
+    check bandTonality([0.0'f32, 0.0, 0.0, 0.0]) == 0.0
+    check bandTonality([1.0'f32, 1.0, 1.0, 1.0]) < 0.1
+    check bandTonality([100.0'f32, 0.0, 0.0, 0.0]) > 0.9
+  test "model2 thresholds follow signal, silence matches ltq shape":
+    initMpaTables()
+    var silent: array[576, float32]
+    let mSil = model2LongThresholds(silent, 44_100, Mpeg1, -12.0)
+    let lt = ltqThresholds(44_100, Mpeg1, 64, -12.0)
+    # Silence: no maskers, every band rides the LTq floor, so the
+    # normalized Model-2 vector keeps the exact LTq shape.
+    for i in 1 ..< 21:
+      check abs(mSil[i] / mSil[0] - lt[i] / lt[0]) < 1e-9
+    # Loud low masker (sfb 2 = lines 8..12 at 44.1 kHz): the masker
+    # band must dramatically exceed its LTq-relative level, proving the
+    # thresholds are signal-dependent rather than a rescaled LTq bowl.
+    var xr: array[576, float32]
+    for k in 8 ..< 12:
+      xr[k] = 200.0 + k.float32 * 13.7
+    let mM = model2LongThresholds(xr, 44_100, Mpeg1, -12.0)
+    check mM[2] / mM[15] > 100.0 * (lt[2] / lt[15])
+    var differs = false
+    for i in 0 ..< 21:
+      if abs(mM[i] / mM[0] - lt[i] / lt[0]) > 1e-6:
+        differs = true
+    check differs
+  test "outer loop steers amplification to the over-threshold band":
+    initMpaTables()
+    # Synthetic spectrum with energy in bands 2 and 5; only band 2 sees
+    # a tight threshold, so only it may be amplified.
+    var xr: array[576, float32]
+    for k in 8 ..< 12:
+      xr[k] = 200.0 + k.float32 * 13.7
+    for k in 24 ..< 30:
+      xr[k] = 150.0 + k.float32 * 7.3
+    var xmin: array[21, float64]
+    for i in 0 ..< 21:
+      xmin[i] = 1.0e30
+    xmin[2] = 0.0
+    var ch = defaultGranuleChannel()
+    let r = outerLoopSearchLong(xr, ch, 44_100, Mpeg1, 400, xmin)
+    check r.ok
+    check ch.scalefacs[2] > 0
+    for i in 0 ..< 21:
+      if i != 2:
+        check ch.scalefacs[i] == 0
+  test "presets arm model2 except fast":
+    initMpaTables()
+    check newMp3EncoderQuality(128, 44_100, MpaMode(kind: mmStereo),
+      qpTransparent).opts.useModel2
+    check newMp3EncoderQuality(128, 44_100, MpaMode(kind: mmStereo),
+      qpHigh).opts.useModel2
+    check newMp3EncoderQuality(128, 44_100, MpaMode(kind: mmStereo),
+      qpStandard).opts.useModel2
+    check not newMp3EncoderQuality(128, 44_100, MpaMode(kind: mmStereo),
+      qpFast).opts.useModel2
+  test "model2 tone fixtures gapless exact, no regression vs ltq":
+    initMpaTables()
+    for (rate, kbps) in [(44100, 128), (48000, 128), (32000, 128)]:
+      for stereo in [false, true]:
+        let src =
+          if stereo: sineStereo(22_050, 440.0, 660.0, 0.4, rate)
+          else: sineMono(22_050, 440.0, 0.5, rate)
+        let mode =
+          if stereo: MpaMode(kind: mmStereo) else: MpaMode(kind: mmMono)
+        let m2 = newMp3EncoderQuality(kbps, rate.uint32, mode, qpHigh)
+        m2.enableXingInfo()
+        m2.pushSamplesI16(toS16Interleaved(src))
+        let gm2 = decodeAll(m2.finishEncoder())
+        check gm2[0].len == 22_050
+        let pm2 = psnrOf(src, gm2)
+        check pm2 > 20.0
+        let lt = newMp3EncoderLtq(kbps, rate.uint32, mode, -12.0)
+        lt.enableXingInfo()
+        lt.pushSamplesI16(toS16Interleaved(src))
+        let glt = decodeAll(lt.finishEncoder())
+        check glt[0].len == 22_050
+        check pm2 >= psnrOf(src, glt) - 3.0
+  test "model2 noise fixture within tolerance":
+    initMpaTables()
+    let src = noiseStereo(22_050, 0.4)
+    let m2 = newMp3EncoderQuality(128, 44_100, MpaMode(kind: mmStereo),
+      qpHigh)
+    m2.enableXingInfo()
+    m2.pushSamplesI16(toS16Interleaved(src))
+    let gm2 = decodeAll(m2.finishEncoder())
+    check gm2[0].len == 22_050
+    let pm2 = psnrOf(src, gm2)
+    check pm2 > 8.0
+    let lt = newMp3EncoderLtq(128, 44_100, MpaMode(kind: mmStereo), -12.0)
+    lt.enableXingInfo()
+    lt.pushSamplesI16(toS16Interleaved(src))
+    let plt = psnrOf(src, decodeAll(lt.finishEncoder()))
+    check pm2 >= plt - 4.0
+  test "model2 lsf, short blocks and manual arming":
+    initMpaTables()
+    let e = newMp3EncoderOuterLoop(128, 44_100, MpaMode(kind: mmStereo))
+    check not e.opts.useModel2
+    e.enableModel2()
+    check e.opts.useModel2
+    check e.opts.useOuterLoop
+    e.enableXingInfo()
+    let src = sineStereo(22_050, 440.0, 660.0, 0.4)
+    e.pushSamplesI16(toS16Interleaved(src))
+    let got = decodeAll(e.finishEncoder())
+    check got[0].len == 22_050
+    check psnrOf(src, got) > 20.0
+    var os = gaplessOpts(128, 44_100, MpaMode(kind: mmStereo))
+    os.useOuterLoop = true
+    os.useModel2 = true
+    os.forceShort = true
+    let gs = decodeAll(encodeMp3Stream(src, os))
+    check gs[0].len == 22_050
+    check psnrOf(src, gs) > 15.0
+    let srcLsf = sineStereo(11_025, 440.0, 660.0, 0.4, 22050)
+    let m2lsf = newMp3EncoderQuality(64, 22_050, MpaMode(kind: mmStereo),
+      qpHigh)
+    m2lsf.enableXingInfo()
+    m2lsf.pushSamplesI16(toS16Interleaved(srcLsf))
+    let glsf = decodeAll(m2lsf.finishEncoder())
+    check glsf[0].len == 11_025
+    check psnrOf(srcLsf, glsf) > 15.0
