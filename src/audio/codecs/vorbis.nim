@@ -19,6 +19,7 @@ import ./../io
 import ./../packet
 import ./../source
 import ./../units
+import ./../vec
 
 # --------------------------------------------------------------- common ---
 
@@ -833,9 +834,7 @@ proc overlapAdd(outp: var openArray[float32]; left, right,
     win: openArray[float32]) =
   assert outp.len == left.len and left.len == right.len and
     right.len == win.len
-  let n = outp.len
-  for i in 0 ..< n:
-    outp[i] = left[i] * win[n - 1 - i] + right[i] * win[i]
+  overlapAddVec(outp, left, right, win)
 
 proc synthChannel*(ch: var DspChannel; blockFlag, prevBlockFlag: bool;
     windows: Windows; imdct: var Imdct; buf: var openArray[float32]) =

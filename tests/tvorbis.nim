@@ -4,6 +4,7 @@ import unittest
 
 import audio/codecs/vorbis
 import audio/errors
+import audio/vec
 
 proc naiveLookup1(entries: uint32; dims: int): uint32 =
   ## Brute-force spec definition: greatest x with x^dims <= entries.
@@ -89,3 +90,25 @@ suite "vorbis unit ports":
       check false
     except AudioError as e:
       check e.kind == ekDecode
+
+suite "simd vector kernels":
+  test "overlapAddVec bit-matches scalar on hostile lengths":
+    var s = 0x2B7E1516'u32
+    proc rnd(): float32 =
+      s = s * 1664525'u32 + 1013904223'u32
+      (((s shr 16) and 0xFFFF'u32).int32 - 32768).float32 / 32768.0
+    for n in [0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63,
+        64, 65, 100, 1000, 4096]:
+      var left = newSeq[float32](n)
+      var right = newSeq[float32](n)
+      var win = newSeq[float32](n)
+      for i in 0 ..< n:
+        left[i] = rnd()
+        right[i] = rnd()
+        win[i] = rnd()
+      var got = newSeq[float32](n)
+      var want = newSeq[float32](n)
+      overlapAddVec(got, left, right, win)
+      for i in 0 ..< n:
+        want[i] = left[i] * win[n - 1 - i] + right[i] * win[i]
+      check got == want

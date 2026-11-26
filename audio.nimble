@@ -11,3 +11,4 @@ srcDir        = "src"
 
 requires "nim >= 2.4.0"
 requires "buffalo >= 0.1.0"
+requires "nimsimd >= 1.3.2"
