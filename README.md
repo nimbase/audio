@@ -31,6 +31,11 @@
   then `makeAudioDecoder(params)`
 - Streaming: mmap file source + 1 MiB reusable byte pool, zero-copy
   packet views (`openWavMapped`, `decodePacketView`)
+- SIMD fast paths (`src/audio/vec.nim` via `nimsimd`): 4-wide SSE2 on
+  x86-64 with scalar fallback elsewhere (ARM stays portable);
+  Vorbis overlap-add and MP3 polyphase windowing run bit-identical
+  at ~3.6x kernel speed (~1.1x end-to-end MP3 decode).
+  `-d:vecScalar` forces the scalar fallback
 
 Codec support (`o` = decode, `w` = encode):
 
@@ -311,8 +316,14 @@ if probeWav(bytes) == 255:
 - [x] ALAC decoder + AIFF/CAF demuxers
 - [x] MKV/WebM demuxer (Vorbis/FLAC/MP3/AAC/ALAC/PCM decode, Opus demux-only)
 - [x] Streaming WAV: mmap source + 1 MiB byte pool, zero-copy views
+- [x] MP3 encoder/decoder fuzz harness (`tests/tfuzzmp3.nim`):
+  hostile headers/side-info/Huffman-count/reservoir/configs/bytes,
+  AudioError-only gate, success paths frame-walk and self-decode
+- [x] Benchmarks (`benchmarks/bmp3.nim` + recorded baselines) and
+  SIMD window kernels (SSE2 via `nimsimd`, scalar fallback,
+  `-d:vecScalar`)
 - [ ] Later: WavPack, pure-Nim Opus + HE-AAC ports, streaming
-  I/O for the remaining formats, fuzz corpus, benchmarks
+  I/O for the remaining formats
 
 ### ❤ Credits
 
