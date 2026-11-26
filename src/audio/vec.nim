@@ -7,7 +7,7 @@
 ## `tests/tmpa.nim`.
 ## Wider ISAs (AVX2/FMA) stay out until a kernel proves SSE2-bound.
 
-when defined(amd64):
+when defined(amd64) and not defined(vecScalar):
   import nimsimd/sse2
 
 proc overlapAddVec*(outp: var openArray[float32]; left, right,
@@ -16,7 +16,7 @@ proc overlapAddVec*(outp: var openArray[float32]; left, right,
   assert outp.len == left.len and left.len == right.len and
     right.len == win.len
   let n = outp.len
-  when defined(amd64):
+  when defined(amd64) and not defined(vecScalar):
     var i = 0
     let n4 = n and (not 3)
     while i < n4:
@@ -42,7 +42,7 @@ proc synthWindowAccum32Vec*(outp: var openArray[float32]; vA, vB, dA,
   ## (MP3 polyphase windowing row; 32 needs no tail loop).
   assert outp.len == 32 and vA.len == 32 and vB.len == 32 and
     dA.len == 32 and dB.len == 32
-  when defined(amd64):
+  when defined(amd64) and not defined(vecScalar):
     var i = 0
     while i < 32:
       let a = mm_loadu_ps(vA[i].unsafeAddr)
