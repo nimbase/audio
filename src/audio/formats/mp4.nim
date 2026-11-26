@@ -25,6 +25,7 @@ import ./../formats
 import ./../io
 import ./../metadata
 import ./../packet
+import ./../source
 import ./../units
 
 const
@@ -77,7 +78,7 @@ proc `==`*(a: Mp4Box; name: string): bool {.inline.} =
     a.typ[1] == name[1].uint8 and a.typ[2] == name[2].uint8 and
     a.typ[3] == name[3].uint8
 
-proc readBoxHeader(r: var Reader; stop: int): Mp4Box =
+proc readBoxHeader[R](r: var R; stop: int): Mp4Box =
   ## Reads `size + fourcc` (+ largesize) at the cursor.
   let pos = r.pos
   if r.remaining() < 8:
@@ -119,20 +120,20 @@ proc probeMp4*(data: openArray[uint8]): int =
     return 127
   255
 
-proc skipBox(r: var Reader; b: Mp4Box) =
+proc skipBox[R](r: var R; b: Mp4Box) =
   if b.stop < 0:
-    r.pos = r.data.len
+    r.setPos(bufLen(r))
   else:
     if r.pos > b.stop:
       raise decodeError("mp4: atom overrun")
     r.pos = b.stop
 
-proc readExtended(r: var Reader): tuple[version: int, flags: int] =
+proc readExtended[R](r: var R): tuple[version: int, flags: int] =
   let v = r.readByte().int
   let f = (r.readByte().int shl 16) or (r.readByte().int shl 8) or r.readByte().int
   (v, f)
 
-proc parseElst(r: var Reader; stop: int) =
+proc parseElst[R](r: var R; stop: int) =
   ## Parses (and ignores) an edit list.
   let (ver, _) = r.readExtended()
   if ver > 1:
@@ -151,7 +152,7 @@ proc parseElst(r: var Reader; stop: int) =
       discard r.readU16Be()
       discard r.readU16Be()
 
-proc readDescriptorHeader(r: var Reader): tuple[tag: int, size: int] =
+proc readDescriptorHeader[R](r: var R): tuple[tag: int, size: int] =
   let tag = r.readByte().int
   if tag == 0x00 or tag == 0xff:
     raise decodeError("mp4: forbidden object descriptor tag")
@@ -220,7 +221,7 @@ proc parseEsdsPayload(data: seq[uint8]): tuple[oti: int,
     raise decodeError("mp4: missing decoder config descriptor")
   (oti, extra)
 
-proc parseMp4aEntry(r: var Reader; stop: int): tuple[rate: uint32,
+proc parseMp4aEntry[R](r: var R; stop: int): tuple[rate: uint32,
     nch: int, extra: seq[uint8], oti: int] =
   ## Parses an `mp4a` sample entry (v0/v1/v2) + nested `esds`.
   if r.pos + 8 > stop:
@@ -262,7 +263,7 @@ proc parseMp4aEntry(r: var Reader; stop: int): tuple[rate: uint32,
       r.pos = child.dataPos
       discard r.readExtended()
       let endPos =
-        if child.stop < 0: r.data.len
+        if child.stop < 0: bufLen(r)
         else: child.stop
       let payload = r.readBytes(endPos - r.pos)
       let (o, e) = parseEsdsPayload(payload)
@@ -273,7 +274,7 @@ proc parseMp4aEntry(r: var Reader; stop: int): tuple[rate: uint32,
       r.skipBox(child)
   (rate, nch, extra, oti)
 
-proc readStbl(r: var Reader; stop: int): tuple[
+proc readStbl[R](r: var R; stop: int): tuple[
     rate: uint32, nch: int, extra: seq[uint8], oti: int, isAlac: bool,
     stts: seq[array[2, uint64]], sttsTotal: uint64,
     stsc: seq[array[2, uint32]], stscFirst: seq[uint64],
@@ -497,7 +498,7 @@ proc buildTrackSamples(stts: seq[array[2, uint64]];
     chunkOff += size
     ts += dur
 
-proc readTrak(r: var Reader; stop: int): tuple[id: int, handler: string,
+proc readTrak[R](r: var R; stop: int): tuple[id: int, handler: string,
     timescale: uint32, mdhdDur: uint64, rate: uint32, nch: int,
     extra: seq[uint8], oti: int, isAlac: bool, samples: seq[Mp4Sample],
     sttsTotal: uint64] =
@@ -594,7 +595,7 @@ proc readTrak(r: var Reader; stop: int): tuple[id: int, handler: string,
               oti = t.oti
               samples = buildTrackSamples(t.stts, t.stsc, t.stscFirst,
                 t.stszConst, t.stsz, t.sampleCount, t.offsets,
-                r.data.len)
+                bufLen(r))
               sttsTotal = t.sttsTotal
               r.pos = d.stop
               haveStbl = true
@@ -617,18 +618,27 @@ proc readTrak(r: var Reader; stop: int): tuple[id: int, handler: string,
   (id, handler, timescale, mdhdDur, rate, nch, extra, oti, isAlac,
     samples, sttsTotal)
 
-proc openMp4*(data: seq[uint8]): Mp4Reader =
-  if probeMp4(data) == 0:
-    raise unsupportedError("mp4: missing ftyp header")
-  result = Mp4Reader(r: newReader(data))
-  var r = newReader(data)
+type
+  Mp4Scan* = object
+    ## Result of the shared box scan: movie header plus per-track sample
+    ## tables and the merged packet index. All positions are absolute
+    ## file offsets.
+    movieRate*: uint32
+    movieDur*: uint64
+    tracks*: seq[Track]
+    data*: seq[Mp4TrackData]
+    packets*: seq[Mp4Packet]
+
+proc scanMp4[R](r: var R; totalLen: int): Mp4Scan =
+  ## Walks ftyp/moov and builds the eager packet index. Shared by the
+  ## owning and mapped opens; `R` is `Reader` or `ViewReader`.
   var haveFtyp = false
   var mvhdRate = 0'u32
   var mvhdDur = 0'u64
   var trackData: seq[Mp4TrackData] = @[]
   var fragmented = false
-  while r.pos + 8 <= data.len:
-    let b = r.readBoxHeader(data.len)
+  while r.pos + 8 <= totalLen:
+    let b = r.readBoxHeader(totalLen)
     if b == "ftyp":
       # Minimal sanity: at least major+minor (8 bytes).
       if b.stop - b.dataPos < 8:
@@ -721,10 +731,9 @@ proc openMp4*(data: seq[uint8]): Mp4Reader =
     raise unsupportedError("mp4: fragmented streams are not supported")
   if trackData.len == 0:
     raise unsupportedError("mp4: no AAC track found")
-  result.tracks = @[]
-  result.data = trackData
+  var tracks: seq[Track] = @[]
   for t in trackData:
-    result.tracks.add(t.track)
+    tracks.add(t.track)
   # Merge packets across tracks by presentation time (seconds).
   var order: seq[array[3, int64]] = @[] # (secNum, trackIdx, sampleIdx)
   for ti in 0 ..< trackData.len:
@@ -736,18 +745,24 @@ proc openMp4*(data: seq[uint8]): Mp4Reader =
     if a[0] != b[0]: cmp(a[0], b[0])
     elif a[1] != b[1]: cmp(a[1], b[1])
     else: cmp(a[2], b[2]))
-  result.packets = @[]
+  var packets: seq[Mp4Packet] = @[]
   for o in order:
     let ti = o[1].int
     let si = o[2].int
     let s = trackData[ti].samples[si]
-    result.packets.add(Mp4Packet(trackIdx: ti, sampleIdx: si, pts: s.ts,
+    packets.add(Mp4Packet(trackIdx: ti, sampleIdx: si, pts: s.ts,
       dur: s.dur))
-  result.posIdx = 0
-  result.metadata = MetadataLog()
-  result.r = newReader(data)
-  result.movieRate = mvhdRate
-  result.movieDur = mvhdDur
+  Mp4Scan(movieRate: mvhdRate, movieDur: mvhdDur, tracks: tracks,
+    data: trackData, packets: packets)
+
+proc openMp4*(data: seq[uint8]): Mp4Reader =
+  if probeMp4(data) == 0:
+    raise unsupportedError("mp4: missing ftyp header")
+  var r = newReader(data)
+  let s = scanMp4(r, data.len)
+  Mp4Reader(r: r, movieRate: s.movieRate, movieDur: s.movieDur,
+    tracks: s.tracks, data: s.data, packets: s.packets, posIdx: 0,
+    metadata: MetadataLog())
 
 proc trackCount*(w: Mp4Reader): int {.inline.} = w.tracks.len
 
@@ -776,13 +791,17 @@ proc nextPacket*(w: Mp4Reader): Option[Packet] =
   pkt.trimEnd = newDuration(0)
   some(pkt)
 
-proc seek*(w: Mp4Reader; to: SeekTo): SeekedTo =
-  let tid = w.tracks[0].id
+proc mp4SeekPos*(tracks: seq[Track]; data: seq[Mp4TrackData];
+    packets: seq[Mp4Packet]; to: SeekTo): tuple[posIdx: int,
+    seeked: SeekedTo] =
+  ## Floor search over track 0's samples mapped to the merged index.
+  ## Pure index math, shared by both seeks (no data access needed).
+  let tid = tracks[0].id
   if to.byTime and to.timeTrackId.isSome and to.timeTrackId.get != tid:
     raise seekError(skInvalidTrack)
   if not to.byTime and to.tsTrackId != tid:
     raise seekError(skInvalidTrack)
-  let track = w.tracks[0]
+  let track = tracks[0]
   var req: Timestamp
   if to.byTime:
     if track.timeBase.isNone:
@@ -797,8 +816,7 @@ proc seek*(w: Mp4Reader; to: SeekTo): SeekedTo =
     raise seekError(skOutOfRange)
   if track.numFrames.isSome and req.get > track.numFrames.get.int64:
     raise seekError(skOutOfRange)
-  # Floor search over track 0's samples, then map to merged index.
-  let td = w.data[0]
+  let td = data[0]
   var lo = 0
   var hi = td.samples.len - 1
   var found = 0
@@ -814,10 +832,95 @@ proc seek*(w: Mp4Reader; to: SeekTo): SeekedTo =
       found = mid
       lo = mid + 1
   var merged = 0
-  for i, p in w.packets.pairs:
+  for i, p in packets.pairs:
     if p.trackIdx == 0 and p.sampleIdx == found:
       merged = i
       break
-  w.posIdx = merged
-  SeekedTo(trackId: 0, requiredTs: req,
-    actualTs: newTimestamp(td.samples[found].ts))
+  (merged, SeekedTo(trackId: 0, requiredTs: req,
+    actualTs: newTimestamp(td.samples[found].ts)))
+
+proc seek*(w: Mp4Reader; to: SeekTo): SeekedTo =
+  let (posIdx, seeked) = mp4SeekPos(w.tracks, w.data, w.packets, to)
+  w.posIdx = posIdx
+  seeked
+
+# -------------------------------------------------- mapped demuxer ---
+
+type
+  Mp4MappedReader* = ref object
+    ## Streaming MP4 demuxer over a memory-mapped file. The box scan runs
+    ## once over views; the eager sample/packet index stores offsets only,
+    ## and packets are windows into the mapping (`PacketView`), so no
+    ## file-sized heap copy exists. Keep the reader open while any view is
+    ## in use; `close` unmaps. AAC and ALAC tracks alike (views are
+    ## codec-agnostic; AAC has `decodePacketView`, ALAC keeps the compat
+    ## owning path).
+    src*: MappedSource
+    movieRate*: uint32
+    movieDur*: uint64
+    tracks*: seq[Track]
+    data*: seq[Mp4TrackData]
+    packets*: seq[Mp4Packet]
+    posIdx*: int
+    metadata*: MetadataLog
+
+proc openMp4Mapped*(path: string): Mp4MappedReader =
+  ## Maps `path` and runs the shared box scan. Packet windows stay
+  ## zero-copy.
+  let src = openMappedSource(path)
+  try:
+    if probeMp4(src.packetBytes(0, src.mappedLen)) == 0:
+      raise unsupportedError("mp4: missing ftyp header")
+    var vr = viewReader(src, 0, src.mappedLen)
+    let s = scanMp4(vr, src.mappedLen)
+    result = Mp4MappedReader(src: src, movieRate: s.movieRate,
+      movieDur: s.movieDur, tracks: s.tracks, data: s.data,
+      packets: s.packets, posIdx: 0, metadata: MetadataLog())
+  except AudioError:
+    src.close()
+    raise
+
+proc close*(w: Mp4MappedReader) =
+  ## Unmaps the file. Outstanding views become invalid.
+  if w != nil and w.src != nil:
+    w.src.close()
+
+proc trackCount*(w: Mp4MappedReader): int {.inline.} = w.tracks.len
+
+proc mediaInfo*(w: Mp4MappedReader): MediaInfo =
+  let tb = tryFromRecip(w.movieRate)
+  var m = MediaInfo(timeBase: tb, startTs: ZeroTimestamp)
+  if tb.isSome:
+    m.duration = some(newDuration(w.movieDur))
+  m
+
+proc numFrames*(w: Mp4MappedReader): Option[uint64] = w.tracks[0].numFrames
+
+proc nextPacketView*(w: Mp4MappedReader): Option[PacketView] =
+  ## Next sample as a mapping window. No bytes are copied; decode with
+  ## `decodePacketView` (AAC) or `packetSeq` for compat.
+  if w.posIdx >= w.packets.len:
+    return none(PacketView)
+  let p = w.packets[w.posIdx]
+  inc w.posIdx
+  let s = w.data[p.trackIdx].samples[p.sampleIdx]
+  some(PacketView(trackId: w.data[p.trackIdx].track.id,
+    pts: newTimestamp(p.pts), dts: newTimestamp(p.pts),
+    dur: newDuration(p.dur), trimStart: ZeroDuration,
+    trimEnd: ZeroDuration, src: w.src, off: s.pos, len: s.size))
+
+proc nextPacket*(w: Mp4MappedReader): Option[Packet] =
+  ## Owning-copy packets (same timing as `nextPacketView`, bounded copy).
+  let v = w.nextPacketView()
+  if v.isNone:
+    return none(Packet)
+  let pv = v.get
+  var pkt = newPacket(pv.trackId, pv.pts, pv.dur, pv.packetSeq())
+  pkt.trimStart = pv.trimStart
+  pkt.trimEnd = pv.trimEnd
+  some(pkt)
+
+proc seek*(w: Mp4MappedReader; to: SeekTo): SeekedTo =
+  let (posIdx, seeked) = mp4SeekPos(w.tracks, w.data, w.packets, to)
+  w.posIdx = posIdx
+  seeked

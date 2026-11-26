@@ -246,7 +246,9 @@ reader.close()
 FLAC mirrors it: `openFlacMapped` + `newFlacDecoder` +
 `decodePacketView`, with MD5 verification intact. MP3 mirrors it too:
 `openMpaMapped` + `newMpaDecoder` + `decodePacketView` (gapless trims
-and reservoir-backtrack seek included).
+and reservoir-backtrack seek included). AAC mirrors it too:
+`openMp4Mapped` + `newAacDecoder` + `decodePacketView`
+(ffmpeg parity past the 1024-sample priming).
 
 ### Probe + seek
 

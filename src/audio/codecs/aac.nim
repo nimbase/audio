@@ -19,6 +19,7 @@ import ./../dsp
 import ./../errors
 import ./../io
 import ./../packet
+import ./../source
 import ./../units
 import ./aac_tables
 
@@ -84,7 +85,7 @@ type
     sbrPresent*: bool
     psPresent*: bool
 
-proc readAacObjectType*(bs: var LtrBitReader): AacObjectType =
+proc readAacObjectType*[L](bs: var L): AacObjectType =
   let idx =
     try:
       let v = bs.readLtrBits(5)
@@ -97,7 +98,7 @@ proc readAacObjectType*(bs: var LtrBitReader): AacObjectType =
   else:
     AotUnknown
 
-proc readAacSampleRate*(bs: var LtrBitReader): uint32 =
+proc readAacSampleRate*[L](bs: var L): uint32 =
   let idx =
     try:
       bs.readLtrBits(4).int
@@ -491,7 +492,7 @@ proc resetIcs*(c: var Ics) =
   for i in 0 ..< 1024:
     c.delay[i] = 0.0
 
-proc decodeIcsInfo*(bs: var LtrBitReader; info: var IcsInfo) =
+proc decodeIcsInfo*[L](bs: var L; info: var IcsInfo) =
   info.prevWindowSeq = info.windowSeq
   info.prevWindowShape = info.windowShape
   try:
@@ -535,13 +536,13 @@ proc groupStartOf*(info: IcsInfo; g: int): int =
   else:
     info.groupStart[g]
 
-proc decodeIcsInfoChecked(bs: var LtrBitReader; bands: openArray[int];
+proc decodeIcsInfoChecked[L](bs: var L; bands: openArray[int];
     info: var IcsInfo) =
   decodeIcsInfo(bs, info)
   if info.maxSfb + 1 > bands.len:
     raise decodeError("aac: ics info max_sfb is too big for the bands size")
 
-proc decodeSectionData*(bs: var LtrBitReader; c: var Ics) =
+proc decodeSectionData*[L](bs: var L; c: var Ics) =
   let sectBits = if c.info.longWin: 5 else: 3
   let escVal = (1 shl sectBits) - 1
   for g in 0 ..< c.info.windowGroups:
@@ -575,7 +576,7 @@ proc decodeSectionData*(bs: var LtrBitReader; c: var Ics) =
       k += secLen
       inc l
 
-proc decodeScaleFactorData*(bs: var LtrBitReader; c: var Ics) =
+proc decodeScaleFactorData*[L](bs: var L; c: var Ics) =
   var noisePcm = true
   var scfIntensity = 155
   var scfNoise = c.globalGain - 90 + 100
@@ -632,7 +633,7 @@ proc decodeNoise*(g: var AacLcg; scale: float32;
   for i in 0 ..< dst.len:
     dst[i] *= k
 
-proc readAacEscape*(bs: var LtrBitReader): int =
+proc readAacEscape*[L](bs: var L): int =
   var n = 0
   try:
     n = bs.readLtrUnaryOnes()
@@ -645,7 +646,7 @@ proc readAacEscape*(bs: var LtrBitReader): int =
   except EndOfStream:
     raise decodeError("aac: truncated escape")
 
-proc decodeQuadsSigned*(bs: var LtrBitReader; cb: VlcTable; scale: float32;
+proc decodeQuadsSigned*[L](bs: var L; cb: VlcTable; scale: float32;
     dst: var openArray[float32]) =
   let lut = [-scale, 0.0'f32, scale]
   var i = 0
@@ -661,7 +662,7 @@ proc decodeQuadsSigned*(bs: var LtrBitReader; cb: VlcTable; scale: float32;
     dst[i + 3] = lut[q mod 3]
     i += 4
 
-proc decodeQuadsUnsigned*(bs: var LtrBitReader; cb: VlcTable;
+proc decodeQuadsUnsigned*[L](bs: var L; cb: VlcTable;
     scale: float32; dst: var openArray[float32]) =
   let lut = [0.0'f32, scale, 2.51984209978974632953'f32 * scale]
   var i = 0
@@ -688,7 +689,7 @@ proc decodeQuadsUnsigned*(bs: var LtrBitReader; cb: VlcTable;
       raise decodeError("aac: truncated spectrum")
     i += 4
 
-proc decodePairsSigned*(bs: var LtrBitReader; t: int; scale: float32;
+proc decodePairsSigned*[L](bs: var L; t: int; scale: float32;
     dst: var openArray[float32]) =
   var i = 0
   while i < dst.len:
@@ -701,7 +702,7 @@ proc decodePairsSigned*(bs: var LtrBitReader; t: int; scale: float32;
     dst[i + 1] = aacPairsVal[t][q][1] * scale
     i += 2
 
-proc decodePairsUnsigned*(bs: var LtrBitReader; t: int; scale: float32;
+proc decodePairsUnsigned*[L](bs: var L; t: int; scale: float32;
     dst: var openArray[float32]) =
   var i = 0
   while i < dst.len:
@@ -720,7 +721,7 @@ proc decodePairsUnsigned*(bs: var LtrBitReader; t: int; scale: float32;
       raise decodeError("aac: truncated spectrum")
     i += 2
 
-proc decodePairsEscape*(bs: var LtrBitReader; scale: float32;
+proc decodePairsEscape*[L](bs: var L; scale: float32;
     dst: var openArray[float32]) =
   var i = 0
   while i < dst.len:
@@ -744,7 +745,7 @@ proc decodePairsEscape*(bs: var LtrBitReader; scale: float32;
       raise decodeError("aac: truncated spectrum")
     i += 2
 
-proc decodeSpectrum*(bs: var LtrBitReader; g: var AacLcg; c: var Ics;
+proc decodeSpectrum*[L](bs: var L; g: var AacLcg; c: var Ics;
     bands: openArray[int]) =
   for i in 0 ..< 1024:
     c.coeffs[i] = 0.0
@@ -784,7 +785,7 @@ proc decodeSpectrum*(bs: var LtrBitReader; g: var AacLcg; c: var Ics;
 
 # ------------------------------------------------------------ tns ---
 
-proc decodeTnsData(bs: var LtrBitReader; c: var Ics) =
+proc decodeTnsData[L](bs: var L; c: var Ics) =
   c.tns.present = false
   for w in 0 ..< 8:
     c.tns.nFilt[w] = 0
@@ -870,7 +871,7 @@ proc tnsSynth*(c: Ics; bands: openArray[int]; rateIdx: int;
             coeffs[i] -= coeffs[i + j + 1] * lpc[j]
           inc m
 
-proc decodeIcs*(bs: var LtrBitReader; g: var AacLcg; c: var Ics;
+proc decodeIcs*[L](bs: var L; g: var AacLcg; c: var Ics;
     row: int; commonWindow: bool) =
   let longB = longBands(row)
   let shortB = shortBands(row)
@@ -1063,10 +1064,10 @@ proc resetPair*(p: var ChannelPair) =
   resetIcs(p.ics0)
   resetIcs(p.ics1)
 
-proc decodeSce*(bs: var LtrBitReader; p: var ChannelPair; row: int) =
+proc decodeSce*[L](bs: var L; p: var ChannelPair; row: int) =
   decodeIcs(bs, p.lcg, p.ics0, row, false)
 
-proc decodeCpe*(bs: var LtrBitReader; p: var ChannelPair; row: int) =
+proc decodeCpe*[L](bs: var L; p: var ChannelPair; row: int) =
   let longB = longBands(row)
   let shortB = shortBands(row)
   var commonWindow = false
@@ -1195,8 +1196,8 @@ proc synthPairAudio(p: var ChannelPair; dsp: var AacDsp; rateIdx: int;
       p.ics1.info.windowShape, p.ics1.info.prevWindowShape,
       planes[p.channel + 1].toOpenArray(0, 1023))
 
-proc decodeRawDataBlock(d: AacDecoder; data: seq[uint8]) =
-  var bs = newLtrBitReader(data)
+proc decodeRawDataBlockData[L](d: AacDecoder; bs: var L) =
+  ## Raw-data-block core over any MSB-first bit cursor (owning or view).
   var curPair = 0
   var curCh = 0
   try:
@@ -1258,11 +1259,33 @@ proc decodeRawDataBlock(d: AacDecoder; data: seq[uint8]) =
     synthPairAudio(d.pairs[p], d.dsp, d.row, useBands, useShort,
       d.buf.f32.planes)
 
+proc decodeRawDataBlock(d: AacDecoder; data: seq[uint8]) =
+  ## Owning entry: copies `data` into a cached reader (as before).
+  var bs = newLtrBitReader(data)
+  d.decodeRawDataBlockData(bs)
+
+proc decodeAacView*(d: AacDecoder; src: MappedSource; off, len: int) =
+  ## Zero-copy decode straight from a mapping window. No packet or bit
+  ## reader copy; output still reuses the decoder's internal buffer.
+  var vr = viewReader(src, off, len)
+  var vbs = vr.restLtr()
+  d.decodeRawDataBlockData(vbs)
+
 method codecParams*(d: AacDecoder): AudioCodecParameters = d.params
 
 method reset*(d: AacDecoder) =
   for p in d.pairs.mitems:
     resetPair(p)
+
+proc applyGaplessTrims(d: AacDecoder; trimStart, trimEnd: Duration) =
+  if d.opts.gapless and d.buf.framesOf() > 0:
+    let total = d.buf.framesOf()
+    let dropFirst = min(trimStart.get.int, total)
+    let keep = total - dropFirst
+    let dropLast = min(trimEnd.get.int, keep)
+    if dropFirst > 0 or dropLast > 0:
+      d.buf.f32.shift(dropFirst)
+      d.buf.f32.truncate(d.buf.f32.numFrames - dropLast)
 
 method decodePacket*(d: AacDecoder; pkt: Packet): AudioSamples =
   d.buf.f32.clear()
@@ -1279,14 +1302,27 @@ method decodePacket*(d: AacDecoder; pkt: Packet): AudioSamples =
   except IndexDefect, RangeDefect:
     d.buf.clearSamples()
     raise decodeError("aac: invalid bitstream")
-  if d.opts.gapless and d.buf.framesOf() > 0:
-    let total = d.buf.framesOf()
-    let dropFirst = min(pkt.trimStart.get.int, total)
-    let keep = total - dropFirst
-    let dropLast = min(pkt.trimEnd.get.int, keep)
-    if dropFirst > 0 or dropLast > 0:
-      d.buf.f32.shift(dropFirst)
-      d.buf.f32.truncate(d.buf.f32.numFrames - dropLast)
+  d.applyGaplessTrims(pkt.trimStart, pkt.trimEnd)
+  d.buf
+
+proc decodePacketView*(d: AacDecoder; v: PacketView): AudioSamples =
+  ## View-based `decodePacket`: identical output (incl. gapless trims),
+  ## no packet copy.
+  d.buf.f32.clear()
+  try:
+    d.buf.f32.renderWith(1024, i):
+      discard i
+    d.decodeAacView(v.src, v.off, v.len)
+  except AudioError as e:
+    d.buf.clearSamples()
+    raise e
+  except EndOfStream:
+    d.buf.clearSamples()
+    raise decodeError("aac: truncated raw data block")
+  except IndexDefect, RangeDefect:
+    d.buf.clearSamples()
+    raise decodeError("aac: invalid bitstream")
+  d.applyGaplessTrims(v.trimStart, v.trimEnd)
   d.buf
 
 method lastDecoded*(d: AacDecoder): AudioSamples = d.buf
