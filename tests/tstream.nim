@@ -5,9 +5,11 @@ import unittest
 import audio/audio
 import audio/codecs
 import audio/codecs/flac
+import audio/codecs/mpa
 import audio/codecs/pcm
 import audio/formats
 import audio/formats/flac as flacfmt
+import audio/formats/mpa as mpafmt
 import audio/formats/wav
 import audio/io
 import audio/packet
@@ -80,6 +82,39 @@ proc collectFlacMem(w: FlacReader; dec: FlacDecoder): AudioSamples =
         result.s32.planes[p][frames + i] = s.s32.planes[p][i]
     result.s32.numFrames = frames + s.framesOf()
     frames += s.framesOf()
+
+proc readRefS16Mpa(path: string; nch: int): seq[seq[int16]] =
+  let raw = readFile(path)
+  var data = newSeq[uint8](raw.len)
+  for i, c in raw:
+    data[i] = cast[uint8](c)
+  var at = 0
+  while not (data[at] == 0x64'u8 and data[at + 1] == 0x61'u8 and
+      data[at + 2] == 0x74'u8 and data[at + 3] == 0x61'u8):
+    inc at
+  var r = newReader(data.toOpenArray(at + 8, data.len - 1))
+  let total = (data.len - at - 8) div (2 * nch)
+  result = newSeq[seq[int16]](nch)
+  for p in 0 ..< nch:
+    result[p] = newSeq[int16](total)
+  for i in 0 ..< total:
+    for p in 0 ..< nch:
+      result[p][i] = r.readI16Le()
+
+proc collectMpaMapped(w: MpaMappedReader; dec: MpaDecoder): seq[seq[float32]] =
+  ## Decodes every frame window with zero packet copies.
+  let nch = w.tracks[0].codec.channels.get.channelCount()
+  result = newSeq[seq[float32]](nch)
+  for p in 0 ..< nch:
+    result[p] = @[]
+  while true:
+    let v = w.nextPacketView()
+    if v.isNone:
+      break
+    let s = dec.decodePacketView(v.get)
+    for p in 0 ..< nch:
+      for i in 0 ..< s.framesOf():
+        result[p].add(s.f32.planes[p][i])
 
 suite "streaming wav":
   test "mapped open matches in-memory header":
@@ -312,3 +347,81 @@ suite "streaming flac":
         w.close()
     finally:
       removeFile(path)
+
+suite "streaming mp3":
+  const Mp3Fix = "tests/fixtures/fix_mp3stereo.mp3"
+  const Mp3Ref = "tests/fixtures/ref_mp3stereo_dec.wav"
+
+  test "mapped open matches in-memory scan":
+    let raw = readFile(Mp3Fix)
+    var bytes = newSeq[uint8](raw.len)
+    for i, c in raw:
+      bytes[i] = cast[uint8](c)
+    let mem = openMpa(bytes)
+    let w = openMpaMapped(Mp3Fix)
+    try:
+      check w.trackCount() == mem.trackCount()
+      check w.tracks[0].codec.codec == CodecMp3
+      check w.tracks[0].codec.sampleRate.get ==
+        mem.tracks[0].codec.sampleRate.get
+      check w.numFrames().get == mem.numFrames().get
+      check w.packets.len == mem.packets.len
+      check w.firstPacketPos == mem.firstPacketPos
+      check w.delay == mem.delay
+    finally:
+      w.close()
+
+  test "mapped view decode matches owning decode, ffmpeg within 2 LSB":
+    let raw = readFile(Mp3Fix)
+    var bytes = newSeq[uint8](raw.len)
+    for i, c in raw:
+      bytes[i] = cast[uint8](c)
+    let mem = openMpa(bytes)
+    let mdec = newMpaDecoder(mem.tracks[0].codec,
+      AudioDecoderOptions(gapless: true, verify: false))
+    var want = newSeq[seq[float32]](2)
+    want[0] = @[]
+    want[1] = @[]
+    while true:
+      let pkt = mem.nextPacket()
+      if pkt.isNone:
+        break
+      let s = mdec.decodePacket(pkt.get)
+      for p in 0 ..< 2:
+        for i in 0 ..< s.framesOf():
+          want[p].add(s.f32.planes[p][i])
+    let w = openMpaMapped(Mp3Fix)
+    try:
+      let dec = newMpaDecoder(w.tracks[0].codec,
+        AudioDecoderOptions(gapless: true, verify: false))
+      let back = collectMpaMapped(w, dec)
+      check back[0].len == want[0].len
+      check back[1].len == want[1].len
+      for i in 0 ..< want[0].len:
+        check back[0][i] == want[0][i]
+        check back[1][i] == want[1][i]
+      let refs = readRefS16Mpa(Mp3Ref, 2)
+      check back[0].len == refs[0].len
+      var worst = 0.0
+      for i in 0 ..< refs[0].len:
+        for p in 0 ..< 2:
+          worst = max(worst,
+            abs(back[p][i].float64 * 32768.0 - refs[p][i].float64))
+      check worst <= 2.0
+    finally:
+      w.close()
+
+  test "mapped seek matches owning seek with reservoir backtrack":
+    let raw = readFile(Mp3Fix)
+    var bytes = newSeq[uint8](raw.len)
+    for i, c in raw:
+      bytes[i] = cast[uint8](c)
+    let mem = openMpa(bytes)
+    let w = openMpaMapped(Mp3Fix)
+    try:
+      let a = mem.seek(seekToTimestamp(newTimestamp(20_000), 0))
+      let b = w.seek(seekToTimestamp(newTimestamp(20_000), 0))
+      check b.actualTs == a.actualTs
+      check w.nextPacketView().get.pts == mem.nextPacket().get.pts
+    finally:
+      w.close()

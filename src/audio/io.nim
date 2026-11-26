@@ -673,6 +673,110 @@ proc realignLtr*(b: var LtrBitReader) =
   b.cache = ltrShl(b.cache, d)
   b.left -= d
 
+# ------------------------------------------------- ViewLtrBitReader ---
+
+type
+  ViewLtrBitReader* = object
+    ## MSB-first cached bit reader over borrowed bytes (mapped MP3/AAC
+    ## frames). Same API as `LtrBitReader` but zero-copy: the backing
+    ## (e.g. `MappedSource`) must outlive every view.
+    base*: ptr UncheckedArray[uint8]
+    len*: int
+    pos*: int
+    cache*: uint64
+    left*: int
+
+proc bitsLeft*(b: ViewLtrBitReader): int {.inline.} =
+  (b.len - b.pos) * 8 + b.left
+
+proc viewLtrRefill(b: var ViewLtrBitReader; maxBytes: int) =
+  ## Appends up to `maxBytes` bytes MSB-first (top-aligned), up to 64
+  ## cached bits total. Raises only if no bits are available at all.
+  let capacity = (64 - b.left) div 8
+  var want = min(maxBytes, capacity)
+  var n = 0
+  while n < want and b.pos < b.len:
+    b.cache = b.cache or (b.base[b.pos].uint64 shl (56 - b.left))
+    inc b.pos
+    b.left += 8
+    inc n
+  if n == 0 and b.left == 0:
+    raise newException(EndOfStream, "mpa: end of bitstream")
+
+proc readLtrBits*(b: var ViewLtrBitReader; n: int): uint32 =
+  ## Reads `n <= 32` bits MSB-first.
+  if n == 0:
+    return 0
+  checkDecode(n > 0 and n <= 32, "bit reader width out of range")
+  var need = n
+  var res = 0'u64
+  while need > 0:
+    if b.left == 0:
+      b.viewLtrRefill(8)
+    let take = min(need, b.left)
+    res = (res shl take) or rtlShr(b.cache, 64 - take)
+    b.cache = ltrShl(b.cache, take)
+    b.left -= take
+    need -= take
+  cast[uint32](res)
+
+proc readLtrBool*(b: var ViewLtrBitReader): bool {.inline.} =
+  b.readLtrBits(1) == 1
+
+proc readLtrBit*(b: var ViewLtrBitReader): uint32 {.inline.} =
+  b.readLtrBits(1)
+
+proc readLtrSigned*(b: var ViewLtrBitReader; n: int): int32 =
+  signExtend(b.readLtrBits(n), n)
+
+proc ignoreLtrBits*(b: var ViewLtrBitReader; n: int) =
+  var need = n
+  while need > 0:
+    if b.left == 0:
+      b.viewLtrRefill(8)
+    let take = min(need, b.left)
+    b.cache = ltrShl(b.cache, take)
+    b.left -= take
+    need -= take
+
+proc readLtrVlc*(b: var ViewLtrBitReader; t: VlcTable): tuple[value: uint32,
+    codeLen: int] =
+  ## Walks a Verbatim (MSB-first) VLC table using the top cache bits.
+  if b.left < t.maxCodeLen:
+    b.viewLtrRefill(8)
+  var bits = b.cache
+  let shift = 64 - t.bitsPerBlock
+  var base = 0
+  while true:
+    let e = t.table[base + cast[int](rtlShr(bits, shift))]
+    case e.kind
+    of veJump:
+      bits = ltrShl(bits, t.bitsPerBlock)
+      base = e.target
+    of veValue:
+      if e.codeLen > b.left:
+        raise newException(EndOfStream, "mpa: end of bitstream")
+      b.cache = ltrShl(b.cache, e.codeLen)
+      b.left -= e.codeLen
+      return (e.value, e.codeLen)
+
+proc readLtrUnaryOnes*(b: var ViewLtrBitReader): int =
+  ## Counts leading 1 bits until the first 0 (AAC escape prefix).
+  while b.readLtrBits(1) == 1:
+    inc result
+
+proc realignLtr*(b: var ViewLtrBitReader) =
+  ## Discards cached bits up to the next byte boundary (DSE align).
+  let d = b.left mod 8
+  b.cache = ltrShl(b.cache, d)
+  b.left -= d
+
+proc restLtr*(v: ViewReader): ViewLtrBitReader {.inline.} =
+  ## Bit cursor over the unread tail. Zero-copy: shares the backing.
+  ViewLtrBitReader(
+    base: cast[ptr UncheckedArray[uint8]](cast[int](v.base) +% v.pos),
+    len: v.len - v.pos, pos: 0, cache: 0, left: 0)
+
 # ------------------------------------------------------------ BitWriter ---
 
 type

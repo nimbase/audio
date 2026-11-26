@@ -13,6 +13,7 @@ import ./../codecs
 import ./../errors
 import ./../io
 import ./../packet
+import ./../source
 import ./../units
 import ./mpa_tables
 
@@ -717,9 +718,9 @@ proc layer1Dequant(bits: int; factor, raw: float32; rawU: uint32): float32 =
   let a = signExtend(inv, bits)
   factor * (a + 1).float32
 
-proc decodeLayer1Frame*(header: FrameHeader; body: openArray[uint8];
+proc decodeLayer1Data[L](header: FrameHeader; bs: var L;
     synth: var array[2, SynthState]; buf: var AudioSamples) =
-  var bs = newLtrBitReader(body)
+  ## Layer 1 core over any MSB-first bit cursor (owning or view).
   if header.hasCrc:
     discard bs.readLtrBits(16)
   var alloc = default(array[2, array[32, int]])
@@ -777,6 +778,12 @@ proc decodeLayer1Frame*(header: FrameHeader; body: openArray[uint8];
       raise decodeError("mp1: missing audio plane")
     synthesis(synth[ch], 12, samples[ch],
       buf.f32.planes[ch].toOpenArray(0, 383))
+
+proc decodeLayer1Frame*(header: FrameHeader; body: openArray[uint8];
+    synth: var array[2, SynthState]; buf: var AudioSamples) =
+  ## Owning entry: copies `body` into a cached reader (as before).
+  var bs = newLtrBitReader(body)
+  decodeLayer1Data(header, bs, synth, buf)
 
 # ------------------------------------------------------------- layer 2 ---
 
@@ -856,7 +863,7 @@ proc layer2SbInfoIdx(header: FrameHeader): int =
   else:
     4
 
-proc layer2Dequant(bs: var LtrBitReader; class: QuantClass): array[3, float32] =
+proc layer2Dequant[L](bs: var L; class: QuantClass): array[3, float32] =
   var raw = [0'u32, 0, 0]
   var bits = 0
   if class.grouping:
@@ -880,9 +887,9 @@ proc layer2Dequant(bs: var LtrBitReader; class: QuantClass): array[3, float32] =
     let s = a.float32 / divisor
     result[i] = class.c * (s + class.d)
 
-proc decodeLayer2Frame*(header: FrameHeader; body: openArray[uint8];
+proc decodeLayer2Data[L](header: FrameHeader; bs: var L;
     synth: var array[2, SynthState]; buf: var AudioSamples) =
-  var bs = newLtrBitReader(body)
+  ## Layer 2 core over any MSB-first bit cursor (owning or view).
   if header.hasCrc:
     discard bs.readLtrBits(16)
   var alloc: array[2, array[32, int]]
@@ -963,6 +970,12 @@ proc decodeLayer2Frame*(header: FrameHeader; body: openArray[uint8];
       raise decodeError("mp2: missing audio plane")
     synthesis(synth[ch], 36, samples[ch],
       buf.f32.planes[ch].toOpenArray(0, 1151))
+
+proc decodeLayer2Frame*(header: FrameHeader; body: openArray[uint8];
+    synth: var array[2, SynthState]; buf: var AudioSamples) =
+  ## Owning entry: copies `body` into a cached reader (as before).
+  var bs = newLtrBitReader(body)
+  decodeLayer2Data(header, bs, synth, buf)
 
 
 # ------------------------------------------------------------- layer 3 ---
@@ -1177,7 +1190,7 @@ proc defaultGranuleChannel*(): GranuleChannel =
     region2Start: 0, preflag: false, scalefacScale: false,
     count1Select: 0, scalefacs: default(array[39, int]), rzero: 0)
 
-proc readGranuleChannelSideInfo*(bs: var LtrBitReader; ch: var GranuleChannel;
+proc readGranuleChannelSideInfo*[L](bs: var L; ch: var GranuleChannel;
     header: FrameHeader) =
   ch.part23Len = bs.readLtrBits(12).int
   ch.bigValues = bs.readLtrBits(9).int
@@ -1230,7 +1243,7 @@ proc readGranuleChannelSideInfo*(bs: var LtrBitReader; ch: var GranuleChannel;
   ch.scalefacScale = bs.readLtrBool()
   ch.count1Select = bs.readLtrBits(1).int
 
-proc readSideInfo*(bs: var LtrBitReader; header: FrameHeader;
+proc readSideInfo*[L](bs: var L; header: FrameHeader;
     frame: var FrameData): int =
   frame.granules[0][0] = defaultGranuleChannel()
   frame.granules[0][1] = defaultGranuleChannel()
@@ -1257,7 +1270,7 @@ proc readSideInfo*(bs: var LtrBitReader; header: FrameHeader;
       readGranuleChannelSideInfo(bs, frame.granules[gr][ch], header)
   header.sideInfoLen()
 
-proc readScaleFactorsMpeg1*(bs: var LtrBitReader; gr, ch: int;
+proc readScaleFactorsMpeg1*[L](bs: var L; gr, ch: int;
     frame: var FrameData): int =
   var bitsRead = 0
   let (slen1, slen2) = (ScaleFactorSlen[frame.granules[gr][ch].scalefacCompress][0],
@@ -1287,7 +1300,7 @@ proc readScaleFactorsMpeg1*(bs: var LtrBitReader; gr, ch: int;
         bitsRead += slen * (e - s)
   bitsRead
 
-proc readScaleFactorsMpeg2*(bs: var LtrBitReader; isIntensity: bool;
+proc readScaleFactorsMpeg2*[L](bs: var L; isIntensity: bool;
     ch: var GranuleChannel): int =
   var bitsRead = 0
   let blockIdx =
@@ -1338,7 +1351,7 @@ proc readScaleFactorsMpeg2*(bs: var LtrBitReader; isIntensity: bool;
 
 # ------------------------------------------------- layer 3 huffman ---
 
-proc readHuffmanSamples*(bs: var LtrBitReader; ch: GranuleChannel;
+proc readHuffmanSamples*[L](bs: var L; ch: GranuleChannel;
     part3bits: int; buf: var openArray[float32]): int =
   if part3bits == 0:
     for i in 0 ..< 576:
@@ -1987,9 +2000,10 @@ proc readMainData*(state: var Layer3State; header: FrameHeader;
       part23Begin += part23len
   (part23Begin + 7) shr 3
 
-proc decodeLayer3Frame*(header: FrameHeader; body: openArray[uint8];
-    state: var Layer3State; buf: var AudioSamples) =
-  var bs = newLtrBitReader(body)
+proc decodeLayer3Data[L](header: FrameHeader; bs: var L;
+    main: openArray[uint8]; state: var Layer3State; buf: var AudioSamples) =
+  ## Layer 3 core over any MSB-first bit cursor. `main` is the frame body
+  ## for reservoir fill (a zero-copy view on the mapped path).
   if header.hasCrc:
     discard bs.readLtrBits(16)
   var frame = FrameData()
@@ -2002,13 +2016,13 @@ proc decodeLayer3Frame*(header: FrameHeader; body: openArray[uint8];
     reservoirClear(state.reservoir)
     raise
   let sideLen = header.sideInfoLen()
-  if sideLen > body.len:
+  if sideLen > main.len:
     reservoirClear(state.reservoir)
     raise decodeError("mpa: truncated side info")
   let underflow =
     try:
       reservoirFill(state.reservoir,
-        body.toOpenArray(sideLen, body.len - 1), frame.mainDataBegin)
+        main.toOpenArray(sideLen, main.len - 1), frame.mainDataBegin)
     except AudioError:
       reservoirClear(state.reservoir)
       raise
@@ -2041,6 +2055,12 @@ proc decodeLayer3Frame*(header: FrameHeader; body: openArray[uint8];
       synthesis(state.synth[ch], 18, state.samples[gr][ch],
         buf.f32.planes[ch].toOpenArray(gr * 576, gr * 576 + 575))
 
+proc decodeLayer3Frame*(header: FrameHeader; body: openArray[uint8];
+    state: var Layer3State; buf: var AudioSamples) =
+  ## Owning entry: copies `body` into a cached reader (as before).
+  var bs = newLtrBitReader(body)
+  decodeLayer3Data(header, bs, body, state, buf)
+
 # ------------------------------------------------------------- decoder ---
 
 type
@@ -2072,13 +2092,8 @@ proc newMpaDecoder*(params: AudioCodecParameters;
     spec: newAudioSpec(44_100, ChStereo), hasSpec: false,
     buf: newAudioSamples(sfF32, newAudioSpec(44_100, ChStereo), 1152))
 
-proc decodeMpaFrame(d: MpaDecoder; data: seq[uint8]) =
-  var r = newReader(data)
-  if r.remaining() < 4:
-    raise decodeError("mpa: truncated frame")
-  let header = parseFrameHeader(r.readU32Be())
-  if header.frameSize != r.remaining():
-    raise decodeError("mpa: invalid packet length")
+proc decodeMpaHead(d: MpaDecoder; header: FrameHeader) =
+  ## Spec setup + buffer clear, shared by the owning and zero-copy paths.
   let spec = specOfHeader(header)
   if not d.hasSpec:
     d.spec = spec
@@ -2088,6 +2103,15 @@ proc decodeMpaFrame(d: MpaDecoder; data: seq[uint8]) =
       d.spec.channels != spec.channels:
     raise decodeError("mpa: invalid audio buffer signal spec for packet")
   d.buf.f32.clear()
+
+proc decodeMpaFrame(d: MpaDecoder; data: seq[uint8]) =
+  var r = newReader(data)
+  if r.remaining() < 4:
+    raise decodeError("mpa: truncated frame")
+  let header = parseFrameHeader(r.readU32Be())
+  if header.frameSize != r.remaining():
+    raise decodeError("mpa: invalid packet length")
+  d.decodeMpaHead(header)
   let body = r.readBytes(r.remaining())
   case d.params.codec
   of CodecMp1:
@@ -2105,6 +2129,49 @@ proc decodeMpaFrame(d: MpaDecoder; data: seq[uint8]) =
   else:
     raise decodeError("mpa: invalid mpeg audio layer")
 
+proc decodeMpaView*(d: MpaDecoder; src: MappedSource; off, len: int) =
+  ## Zero-copy decode straight from a mapping window. No packet or bit
+  ## reader copy; reservoir bytes still copy into owned state (bounded).
+  var vr = viewReader(src, off, len)
+  if vr.remaining() < MpegHeaderLen:
+    raise decodeError("mpa: truncated frame")
+  let header = parseFrameHeader(vr.readU32Be())
+  if header.frameSize != vr.remaining():
+    raise decodeError("mpa: invalid packet length")
+  d.decodeMpaHead(header)
+  var vbs = vr.restLtr()
+  try:
+    case d.params.codec
+    of CodecMp1:
+      if header.layer != Layer1:
+        raise decodeError("mpa: invalid mpeg audio layer")
+      decodeLayer1Data(header, vbs, d.state.l1synth, d.buf)
+    of CodecMp2:
+      if header.layer != Layer2:
+        raise decodeError("mpa: invalid mpeg audio layer")
+      decodeLayer2Data(header, vbs, d.state.l2synth, d.buf)
+    of CodecMp3:
+      if header.layer != Layer3:
+        raise decodeError("mpa: invalid mpeg audio layer")
+      decodeLayer3Data(header, vbs,
+        src.packetBytes(off + MpegHeaderLen, header.frameSize),
+        d.state.l3, d.buf)
+    else:
+      raise decodeError("mpa: invalid mpeg audio layer")
+  except AudioError:
+    d.buf.clearSamples()
+    raise
+
+proc applyGaplessTrims(d: MpaDecoder; trimStart, trimEnd: Duration) =
+  if d.opts.gapless and d.buf.framesOf() > 0:
+    let total = d.buf.framesOf()
+    let dropFirst = min(trimStart.get.int, total)
+    let keep = total - dropFirst
+    let dropLast = min(trimEnd.get.int, keep)
+    if dropFirst > 0 or dropLast > 0:
+      d.buf.f32.shift(dropFirst)
+      d.buf.f32.truncate(d.buf.f32.numFrames - dropLast)
+
 method codecParams*(d: MpaDecoder): AudioCodecParameters = d.params
 
 method reset*(d: MpaDecoder) =
@@ -2119,14 +2186,21 @@ method decodePacket*(d: MpaDecoder; pkt: Packet): AudioSamples =
   except IndexDefect, RangeDefect:
     d.buf.clearSamples()
     raise decodeError("mpa: invalid bitstream")
-  if d.opts.gapless and d.buf.framesOf() > 0:
-    let total = d.buf.framesOf()
-    let dropFirst = min(pkt.trimStart.get.int, total)
-    let keep = total - dropFirst
-    let dropLast = min(pkt.trimEnd.get.int, keep)
-    if dropFirst > 0 or dropLast > 0:
-      d.buf.f32.shift(dropFirst)
-      d.buf.f32.truncate(d.buf.f32.numFrames - dropLast)
+  d.applyGaplessTrims(pkt.trimStart, pkt.trimEnd)
+  d.buf
+
+proc decodePacketView*(d: MpaDecoder; v: PacketView): AudioSamples =
+  ## View-based `decodePacket`: identical output (incl. gapless trims),
+  ## no packet copy.
+  try:
+    d.decodeMpaView(v.src, v.off, v.len)
+  except AudioError as e:
+    d.buf.clearSamples()
+    raise e
+  except IndexDefect, RangeDefect:
+    d.buf.clearSamples()
+    raise decodeError("mpa: invalid bitstream")
+  d.applyGaplessTrims(v.trimStart, v.trimEnd)
   d.buf
 
 method lastDecoded*(d: MpaDecoder): AudioSamples = d.buf

@@ -19,6 +19,7 @@ import ./../formats
 import ./../io
 import ./../metadata
 import ./../packet
+import ./../source
 import ./../units
 
 const
@@ -84,7 +85,7 @@ proc probeMpa*(data: openArray[uint8]): int =
     return 0
   255
 
-proc syncMpaFrame*(data: seq[uint8]; pos: var int): uint32 =
+proc syncMpaFrame*(data: openArray[uint8]; pos: var int): uint32 =
   ## Byte-wise sync; on success `pos` is past the 4-byte header.
   var sync = 0'u32
   while true:
@@ -102,7 +103,7 @@ proc syncMpaFrame*(data: seq[uint8]; pos: var int): uint32 =
     sync = (sync shl 8) or data[pos].uint32
     inc pos
 
-proc readMpaFrame*(data: seq[uint8]; pos: var int): tuple[header: FrameHeader,
+proc readMpaFrame*(data: openArray[uint8]; pos: var int): tuple[header: FrameHeader,
     start: int] =
   ## Strict frame read: sync + parse, then verify the next frame looks
   ## similar; on failure rewind to the second byte and retry.
@@ -140,7 +141,7 @@ proc readMpaFrame*(data: seq[uint8]; pos: var int): tuple[header: FrameHeader,
 proc infoTagOffset*(header: FrameHeader): int {.inline.} =
   MpegHeaderLen + header.sideInfoLen()
 
-proc isMaybeInfoTag*(data: seq[uint8]; header: FrameHeader): bool =
+proc isMaybeInfoTag*(data: openArray[uint8]; header: FrameHeader): bool =
   if header.layer != Layer3:
     return false
   let off = infoTagOffset(header)
@@ -161,7 +162,7 @@ proc readBeU24*(data: openArray[uint8]; at: int): uint32 {.inline.} =
   (data[at].uint32 shl 16) or (data[at + 1].uint32 shl 8) or
     data[at + 2].uint32
 
-proc tryReadInfoTag*(data: seq[uint8]; header: FrameHeader): tuple[ok: bool,
+proc tryReadInfoTag*(data: openArray[uint8]; header: FrameHeader): tuple[ok: bool,
     numFrames: uint32, delay, padding: int] =
   ## Parses a Xing/Info (+LAME) tag; (false,_,_,_) when absent/invalid.
   result = (false, 0, 0, 0)
@@ -171,7 +172,8 @@ proc tryReadInfoTag*(data: seq[uint8]; header: FrameHeader): tuple[ok: bool,
   var crc = crc16AnsiLe(data.toOpenArray(0, off - 1))
   var p = off + 4
   try:
-    proc takeU32(p: var int; crc: var uint16): uint32 =
+    proc takeU32(data: openArray[uint8]; p: var int;
+        crc: var uint16): uint32 =
       if p + 4 > data.len:
         raise newException(EndOfStream, "short tag")
       let v = (data[p].uint32 shl 24) or (data[p + 1].uint32 shl 16) or
@@ -179,40 +181,41 @@ proc tryReadInfoTag*(data: seq[uint8]; header: FrameHeader): tuple[ok: bool,
       crc = crc16AnsiLe(data.toOpenArray(p, p + 3), crc)
       p += 4
       v
-    proc takeBytes(p: var int; n: int; crc: var uint16): bool =
+    proc takeBytes(data: openArray[uint8]; p: var int; n: int;
+        crc: var uint16): bool =
       if p + n > data.len:
         return false
       crc = crc16AnsiLe(data.toOpenArray(p, p + n - 1), crc)
       p += n
       true
-    let flags = takeU32(p, crc)
+    let flags = takeU32(data, p, crc)
     var numFrames = 0'u32
     if (flags and 1) != 0:
-      numFrames = takeU32(p, crc)
+      numFrames = takeU32(data, p, crc)
     if (flags and 2) != 0:
-      discard takeU32(p, crc)
+      discard takeU32(data, p, crc)
     if (flags and 4) != 0:
-      if not takeBytes(p, 100, crc):
+      if not takeBytes(data, p, 100, crc):
         return
     if (flags and 8) != 0:
-      discard takeU32(p, crc)
+      discard takeU32(data, p, crc)
     if data.len - p < 24:
       return (true, numFrames, 0, 0)
     let enc0 = data[p]
     let enc1 = data[p + 1]
     let enc2 = data[p + 2]
     let enc3 = data[p + 3]
-    if not takeBytes(p, 9, crc):
+    if not takeBytes(data, p, 9, crc):
       return (true, numFrames, 0, 0)
-    if not takeBytes(p, 2, crc):
+    if not takeBytes(data, p, 2, crc):
       return (true, numFrames, 0, 0)
-    if not takeBytes(p, 4, crc):
+    if not takeBytes(data, p, 4, crc):
       return (true, numFrames, 0, 0)
-    if not takeBytes(p, 2, crc):
+    if not takeBytes(data, p, 2, crc):
       return (true, numFrames, 0, 0)
-    if not takeBytes(p, 2, crc):
+    if not takeBytes(data, p, 2, crc):
       return (true, numFrames, 0, 0)
-    if not takeBytes(p, 2, crc):
+    if not takeBytes(data, p, 2, crc):
       return (true, numFrames, 0, 0)
     if data.len - p < 3:
       return (true, numFrames, 0, 0)
@@ -233,7 +236,7 @@ proc tryReadInfoTag*(data: seq[uint8]; header: FrameHeader): tuple[ok: bool,
     var tagCrc: uint16 = 0
     var hasCrc = false
     if data.len - p >= 12:
-      if not takeBytes(p, 2 + 2 + 2 + 4 + 2, crc):
+      if not takeBytes(data, p, 2 + 2 + 2 + 4 + 2, crc):
         return (true, numFrames, delay, padding)
       if header.hasCrc or (enc0 == 0x4c'u8 and enc1 == 0x41'u8 and
           enc2 == 0x4d'u8 and enc3 == 0x45'u8):
@@ -249,7 +252,7 @@ proc tryReadInfoTag*(data: seq[uint8]; header: FrameHeader): tuple[ok: bool,
 
 proc vbriTagOffset*(): int {.inline.} = MpegHeaderLen + 32
 
-proc isMaybeVbriTag*(data: seq[uint8]; header: FrameHeader): bool =
+proc isMaybeVbriTag*(data: openArray[uint8]; header: FrameHeader): bool =
   if header.layer != Layer3:
     return false
   let off = vbriTagOffset()
@@ -263,7 +266,7 @@ proc isMaybeVbriTag*(data: seq[uint8]; header: FrameHeader): bool =
       return false
   true
 
-proc tryReadVbriTag*(data: seq[uint8];
+proc tryReadVbriTag*(data: openArray[uint8];
     header: FrameHeader): tuple[ok: bool, numFrames: uint32] =
   result = (false, 0)
   if not isMaybeVbriTag(data, header):
@@ -282,7 +285,7 @@ proc tryReadVbriTag*(data: seq[uint8];
   except AudioError:
     return (false, 0)
 
-proc estimateNumFrames*(data: seq[uint8]; start: int): Option[uint64] =
+proc estimateNumFrames*(data: openArray[uint8]; start: int): Option[uint64] =
   ## CBR average over up to 16 frames / 16 KiB.
   var pos = start
   var totalLen = 0
@@ -305,10 +308,18 @@ proc estimateNumFrames*(data: seq[uint8]; start: int): Option[uint64] =
   let avg = totalLen.float64 / totalFrames.float64
   some(uint64((data.len - start).float64 / avg))
 
-proc openMpa*(data: seq[uint8]): MpaReader =
-  if data.len < 4 or probeMpa(data) == 0:
-    raise unsupportedError("mpa: missing mpeg frame sync")
-  result = MpaReader(r: newReader(data))
+type
+  MpaScan* = object
+    ## Result of the shared resync scan: track plus the eager packet
+    ## index. All offsets are absolute file positions.
+    track*: Track
+    packets*: seq[MpaPacket]
+    firstPacketPos*: int
+    delay*: int64
+
+proc scanMpa*(data: openArray[uint8]): MpaScan =
+  ## Full resync scan. Shared by the owning and mapped opens; slicing an
+  ## `openArray` borrows, so the mapped path copies nothing here.
   var pos = 0
   let (header, firstStart) =
     try:
@@ -345,7 +356,6 @@ proc openMpa*(data: seq[uint8]): MpaReader =
   if numFrames.isSome:
     track.numFrames = numFrames
     track.duration = some(newDuration(numFrames.get))
-  result.tracks = @[track]
   var packetList: seq[MpaPacket] = @[]
   var nextTs = -delay.int64
   let validEnd =
@@ -386,11 +396,16 @@ proc openMpa*(data: seq[uint8]): MpaReader =
     pos = stop
   if packetList.len == 0:
     raise decodeError("mpa: no audio frames found")
-  result.packets = packetList
-  result.posIdx = 0
-  result.firstPacketPos = firstStart
-  result.delay = delay.int64
-  result.metadata = MetadataLog()
+  MpaScan(track: track, packets: packetList, firstPacketPos: firstStart,
+    delay: delay.int64)
+
+proc openMpa*(data: seq[uint8]): MpaReader =
+  if data.len < 4 or probeMpa(data) == 0:
+    raise unsupportedError("mpa: missing mpeg frame sync")
+  let s = scanMpa(data)
+  result = MpaReader(r: newReader(data), tracks: @[s.track],
+    packets: s.packets, posIdx: 0, metadata: MetadataLog(),
+    firstPacketPos: s.firstPacketPos, delay: s.delay)
 
 proc trackCount*(w: MpaReader): int {.inline.} = w.tracks.len
 
@@ -414,7 +429,7 @@ proc nextPacket*(w: MpaReader): Option[Packet] =
   pkt.trimEnd = newDuration(p.trimEnd)
   some(pkt)
 
-proc mainDataBeginAt*(data: seq[uint8]; start: int;
+proc mainDataBeginAt*(data: openArray[uint8]; start: int;
     header: FrameHeader): int =
   ## Side-info main_data_begin for seek backtrack (Layer 3 layout; for
   ## Layers 1/2 the value is meaningless but harmless, as in Symphonia).
@@ -428,12 +443,15 @@ proc mainDataBeginAt*(data: seq[uint8]; start: int;
   else:
     data[p].int
 
-proc seek*(w: MpaReader; to: SeekTo): SeekedTo =
+proc mpaSeekFound*(packets: seq[MpaPacket]; track: Track; delay: int64;
+    to: SeekTo): tuple[req: Timestamp, found: int] =
+  ## Request validation + binary search over the packet index. Shared by
+  ## both seeks; data access (header re-parse, reservoir backtrack) stays
+  ## per-reader below.
   if to.byTime and to.timeTrackId.isSome and to.timeTrackId.get != 0:
     raise seekError(skInvalidTrack)
   if not to.byTime and to.tsTrackId != 0:
     raise seekError(skInvalidTrack)
-  let track = w.tracks[0]
   var req: Timestamp
   if to.byTime:
     if track.timeBase.isNone:
@@ -444,7 +462,7 @@ proc seek*(w: MpaReader; to: SeekTo): SeekedTo =
     req = ts.get
   else:
     req = to.ts
-  let minTs = newTimestamp(-w.delay)
+  let minTs = newTimestamp(-delay)
   var maxTs = minTs
   if track.numFrames.isSome:
     maxTs = newTimestamp(minTs.get + track.numFrames.get.int64)
@@ -453,11 +471,11 @@ proc seek*(w: MpaReader; to: SeekTo): SeekedTo =
   if track.numFrames.isSome and req.get > maxTs.get:
     raise seekError(skOutOfRange)
   var lo = 0
-  var hi = w.packets.len - 1
+  var hi = packets.len - 1
   var found = 0
   while lo <= hi:
     let mid = (lo + hi) div 2
-    let p = w.packets[mid]
+    let p = packets[mid]
     let spanEnd = p.pts + int64(p.dur + p.trimStart + p.trimEnd)
     if p.pts <= req.get and req.get < spanEnd:
       found = mid
@@ -467,7 +485,29 @@ proc seek*(w: MpaReader; to: SeekTo): SeekedTo =
     else:
       found = mid
       lo = mid + 1
-  var target = found
+  (req, found)
+
+proc mpaSeekBacktrack*(packets: seq[MpaPacket]; found: int; start,
+    mdb: int): int =
+  ## Reservoir backtrack: at most 4 packets back covering `mdb` bytes.
+  result = found
+  if mdb > 0:
+    var need = mdb
+    var k = found
+    var steps = 0
+    while k > 0 and steps < 4:
+      let prev = packets[k - 1]
+      let cover = start - prev.start
+      if cover >= need:
+        result = k - 1
+        break
+      result = k - 1
+      need -= cover
+      dec k
+      inc steps
+
+proc seek*(w: MpaReader; to: SeekTo): SeekedTo =
+  let (req, found) = mpaSeekFound(w.packets, w.tracks[0], w.delay, to)
   let tp = w.packets[found]
   var hdr: FrameHeader
   try:
@@ -476,21 +516,96 @@ proc seek*(w: MpaReader; to: SeekTo): SeekedTo =
   except AudioError:
     raise decodeError("mpa: invalid frame at seek target")
   let mdb = mainDataBeginAt(w.r.data, tp.start, hdr)
-  if mdb > 0:
-    var need = mdb
-    var k = found
-    var steps = 0
-    while k > 0 and steps < 4:
-      let prev = w.packets[k - 1]
-      let cover = tp.start - prev.start
-      if cover >= need:
-        target = k - 1
-        break
-      target = k - 1
-      need -= cover
-      dec k
-      inc steps
+  let target = mpaSeekBacktrack(w.packets, found, tp.start, mdb)
   w.posIdx = target
   w.r.pos = w.packets[target].start
+  SeekedTo(trackId: 0, requiredTs: req,
+    actualTs: newTimestamp(w.packets[target].pts))
+
+# -------------------------------------------------- mapped demuxer ---
+
+type
+  MpaMappedReader* = ref object
+    ## Streaming MP3 demuxer over a memory-mapped file. The eager packet
+    ## index stores offsets only; packets are windows into the mapping
+    ## (`PacketView`), so no file-sized heap copy exists. Keep the reader
+    ## open while any view is in use; `close` unmaps.
+    src*: MappedSource
+    tracks*: seq[Track]
+    packets*: seq[MpaPacket]
+    posIdx*: int
+    metadata*: MetadataLog
+    firstPacketPos*: int
+    delay*: int64
+
+proc openMpaMapped*(path: string): MpaMappedReader =
+  ## Maps `path` and runs the shared resync scan. Packet windows stay
+  ## zero-copy (the scan slices views, never copies).
+  let src = openMappedSource(path)
+  try:
+    if src.mappedLen < 4 or
+        probeMpa(src.packetBytes(0, src.mappedLen)) == 0:
+      raise unsupportedError("mpa: missing mpeg frame sync")
+    let s = scanMpa(src.packetBytes(0, src.mappedLen))
+    result = MpaMappedReader(src: src, tracks: @[s.track],
+      packets: s.packets, posIdx: 0, metadata: MetadataLog(),
+      firstPacketPos: s.firstPacketPos, delay: s.delay)
+  except AudioError:
+    src.close()
+    raise
+
+proc close*(w: MpaMappedReader) =
+  ## Unmaps the file. Outstanding views become invalid.
+  if w != nil and w.src != nil:
+    w.src.close()
+
+proc trackCount*(w: MpaMappedReader): int {.inline.} = w.tracks.len
+
+proc mediaInfo*(w: MpaMappedReader): MediaInfo =
+  let t = w.tracks[0]
+  MediaInfo(timeBase: t.timeBase, duration: t.duration, startTs: t.startTs)
+
+proc numFrames*(w: MpaMappedReader): Option[uint64] = w.tracks[0].numFrames
+
+proc nextPacketView*(w: MpaMappedReader): Option[PacketView] =
+  ## Next frame as a mapping window. No bytes are copied; decode with
+  ## `decodePacketView` (MPA) or `packetSeq` for compat.
+  if w.posIdx >= w.packets.len:
+    return none(PacketView)
+  let p = w.packets[w.posIdx]
+  inc w.posIdx
+  some(PacketView(trackId: 0, pts: newTimestamp(p.pts),
+    dts: newTimestamp(p.pts), dur: newDuration(p.dur),
+    trimStart: newDuration(p.trimStart), trimEnd: newDuration(p.trimEnd),
+    src: w.src, off: p.start, len: p.stop - p.start))
+
+proc nextPacket*(w: MpaMappedReader): Option[Packet] =
+  ## Owning-copy packets (same timing as `nextPacketView`, bounded copy).
+  let v = w.nextPacketView()
+  if v.isNone:
+    return none(Packet)
+  let pv = v.get
+  var pkt = newPacket(pv.trackId, pv.pts, pv.dur, pv.packetSeq())
+  pkt.trimStart = pv.trimStart
+  pkt.trimEnd = pv.trimEnd
+  some(pkt)
+
+proc seek*(w: MpaMappedReader; to: SeekTo): SeekedTo =
+  let (req, found) = mpaSeekFound(w.packets, w.tracks[0], w.delay, to)
+  let tp = w.packets[found]
+  var hdr: FrameHeader
+  try:
+    # Header + side-info prefix only (main_data_begin lives at +4..+7).
+    let winLen = min(8, tp.stop - tp.start)
+    if winLen < 4:
+      raise decodeError("mpa: invalid frame at seek target")
+    var vr = viewReader(w.src, tp.start, winLen)
+    hdr = parseFrameHeader(vr.readU32Be())
+  except AudioError:
+    raise decodeError("mpa: invalid frame at seek target")
+  let mdb = mainDataBeginAt(w.src.packetBytes(tp.start,
+    min(8, tp.stop - tp.start)), 0, hdr)
+  let target = mpaSeekBacktrack(w.packets, found, tp.start, mdb)
+  w.posIdx = target
   SeekedTo(trackId: 0, requiredTs: req,
     actualTs: newTimestamp(w.packets[target].pts))
