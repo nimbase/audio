@@ -248,7 +248,8 @@ FLAC mirrors it: `openFlacMapped` + `newFlacDecoder` +
 `openMpaMapped` + `newMpaDecoder` + `decodePacketView` (gapless trims
 and reservoir-backtrack seek included). AAC mirrors it too:
 `openMp4Mapped` + `newAacDecoder` + `decodePacketView`
-(ffmpeg parity past the 1024-sample priming).
+(ffmpeg parity past the 1024-sample priming). ALAC in MP4 mirrors it
+too via `openMp4Mapped` + `decodePacketView` (bit-exact).
 
 ### Probe + seek
 

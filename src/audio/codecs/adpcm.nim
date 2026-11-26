@@ -20,6 +20,7 @@ import ./../codecs
 import ./../errors
 import ./../io
 import ./../packet
+import ./../source
 import ./../units
 
 const
@@ -83,7 +84,7 @@ proc msExpand(st: var MsStatus; b: uint8; upper: bool): int32 =
   st.delta = max((MsAdaptTable[nib.int] *% st.delta) div 256, MsDeltaMin)
   st.sample1 shl 16
 
-proc readMsMonoPreamble(r: var Reader): MsStatus =
+proc readMsMonoPreamble[R](r: var R): MsStatus =
   let predictor = r.readByte().int
   if predictor > 6:
     raise unsupportedError("adpcm: block predictor exceeds range")
@@ -93,7 +94,7 @@ proc readMsMonoPreamble(r: var Reader): MsStatus =
   result.sample1 = cast[int16](r.readU16Le()).int32
   result.sample2 = cast[int16](r.readU16Le()).int32
 
-proc readMsStereoPreamble(r: var Reader): tuple[left, right: MsStatus] =
+proc readMsStereoPreamble[R](r: var R): tuple[left, right: MsStatus] =
   let lp = r.readByte().int
   if lp > 6:
     raise unsupportedError("adpcm: block predictor exceeds range")
@@ -111,7 +112,7 @@ proc readMsStereoPreamble(r: var Reader): tuple[left, right: MsStatus] =
   result.right = MsStatus(coeff1: MsCoeffs1[rp], coeff2: MsCoeffs2[rp],
     delta: rd, sample1: rs1, sample2: rs2)
 
-proc decodeMsMono*(r: var Reader; outp: var openArray[int32];
+proc decodeMsMono*[R](r: var R; outp: var openArray[int32];
     framesPerBlock: int) =
   checkDecode(framesPerBlock >= 2 and framesPerBlock mod 2 == 0,
     "adpcm: invalid ms mono block size")
@@ -123,7 +124,7 @@ proc decodeMsMono*(r: var Reader; outp: var openArray[int32];
     outp[b * 2] = st.msExpand(byte, true)
     outp[b * 2 + 1] = st.msExpand(byte, false)
 
-proc decodeMsStereo*(r: var Reader; left, right: var openArray[int32];
+proc decodeMsStereo*[R](r: var R; left, right: var openArray[int32];
     framesPerBlock: int) =
   checkDecode(framesPerBlock >= 2, "adpcm: invalid ms stereo block size")
   var st = readMsStereoPreamble(r)
@@ -161,7 +162,7 @@ proc imaExpand(st: var ImaStatus; b: uint8; upper: bool): int32 =
   st.stepIndex = idx
   st.predictor shl 16
 
-proc readImaWavPreamble(r: var Reader): ImaStatus =
+proc readImaWavPreamble[R](r: var R): ImaStatus =
   let predictor = cast[int16](r.readU16Le()).int32
   let stepIndex = r.readByte().int32
   if stepIndex > 88:
@@ -169,7 +170,7 @@ proc readImaWavPreamble(r: var Reader): ImaStatus =
   discard r.readByte() # Reserved.
   ImaStatus(predictor: predictor, stepIndex: stepIndex)
 
-proc decodeImaWavMono*(r: var Reader; outp: var openArray[int32];
+proc decodeImaWavMono*[R](r: var R; outp: var openArray[int32];
     framesPerBlock: int) =
   let dataBytes = (framesPerBlock - 1) div 2
   # Trailing frames when (frames-1) is odd stay silent (the reference
@@ -184,7 +185,7 @@ proc decodeImaWavMono*(r: var Reader; outp: var openArray[int32];
     if 1 + b * 2 + 1 < outp.len:
       outp[1 + b * 2 + 1] = st.imaExpand(byte, true)
 
-proc decodeImaWavStereo*(r: var Reader; left, right: var openArray[int32];
+proc decodeImaWavStereo*[R](r: var R; left, right: var openArray[int32];
     framesPerBlock: int) =
   if framesPerBlock == 0 or (framesPerBlock - 1) mod 8 != 0:
     raise decodeError("adpcm (ima): frames_per_block - 1 must be a multiple of 8")
@@ -205,13 +206,13 @@ proc decodeImaWavStereo*(r: var Reader; left, right: var openArray[int32];
       right[1 + offset + byte * 2] = rr.imaExpand(nibbles, false)
       right[1 + offset + byte * 2 + 1] = rr.imaExpand(nibbles, true)
 
-proc readImaQtPreamble(r: var Reader): ImaStatus =
+proc readImaQtPreamble[R](r: var R): ImaStatus =
   let header = r.readU16Be()
   let predictor = cast[int16](header and 0xff80'u16).int32
   let stepIndex = min((header and 0x7f'u16).int32, 88)
   ImaStatus(predictor: predictor, stepIndex: stepIndex)
 
-proc decodeImaQtMono*(r: var Reader; outp: var openArray[int32]) =
+proc decodeImaQtMono*[R](r: var R; outp: var openArray[int32]) =
   ## IMA-QT blocks are fixed: 2-byte header + 32 data bytes = 64 frames.
   checkDecode(outp.len >= 64, "adpcm (ima-qt): output needs 64 frames")
   var st = readImaQtPreamble(r)
@@ -220,7 +221,7 @@ proc decodeImaQtMono*(r: var Reader; outp: var openArray[int32]) =
     outp[b * 2] = st.imaExpand(nibbles, false)
     outp[b * 2 + 1] = st.imaExpand(nibbles, true)
 
-proc decodeImaQtStereo*(r: var Reader; left, right: var openArray[int32]) =
+proc decodeImaQtStereo*[R](r: var R; left, right: var openArray[int32]) =
   r.decodeImaQtMono(left)
   r.decodeImaQtMono(right)
 
@@ -255,8 +256,8 @@ proc newAdpcmDecoder*(params: AudioCodecParameters;
   AdpcmDecoder(params: params, kind: kind, framesPerBlock: framesPerBlock,
     buf: newAudioSamples(sfS32, spec, capacity))
 
-proc decodeFrames(d: AdpcmDecoder; data: seq[uint8]; total: int) =
-  var r = newReader(data)
+proc decodeFramesFrom[R](d: AdpcmDecoder; r: var R; total: int) =
+  ## Block decode core over any byte cursor (owning or view).
   let nch = d.buf.specOf().channels.channelCount()
   let framesPerBlock = d.framesPerBlock
   checkDecode(framesPerBlock > 0, "adpcm: invalid frames per block")
@@ -331,17 +332,42 @@ method reset*(d: AdpcmDecoder) =
   ## No inter-packet state: nothing to do.
   discard
 
+proc decodeFrames(d: AdpcmDecoder; data: seq[uint8]; total: int) =
+  ## Owning decode (as before; `data` is an owned packet).
+  var r = newReader(data)
+  d.decodeFramesFrom(r, total)
+
+proc decodeAdpcmView*(d: AdpcmDecoder; src: MappedSource; off, len,
+    total: int) =
+  ## Zero-copy decode straight from a mapping window. No packet copy;
+  ## output still reuses the decoder's internal buffer.
+  var vr = viewReader(src, off, len)
+  d.decodeFramesFrom(vr, total)
+
+proc packetTotal*(d: AdpcmDecoder; blockDur: Duration): int =
+  ## Block-aligned frame count for a packet duration.
+  let unit =
+    if d.kind == akImaQt:
+      if d.buf.specOf().channels.channelCount() == 1: 64'u64 else: 128'u64
+    else:
+      d.framesPerBlock.uint64
+  (blockDur.get div unit * unit).int
+
+proc decodePacketView*(d: AdpcmDecoder; v: PacketView): AudioSamples =
+  ## View-based `decodePacket`: identical output, no packet copy.
+  try:
+    d.decodeAdpcmView(v.src, v.off, v.len, d.packetTotal(v.blockDur()))
+  except AudioError as e:
+    d.buf.clearSamples()
+    raise e
+  d.buf
+
 method decodePacket*(d: AdpcmDecoder; pkt: Packet): AudioSamples =
   try:
     # Block count derives from the packet duration like the reference
     # (block_dur / frames_per_block). IMA-QT uses fixed 64-frame mono
     # blocks (128 per stereo pair) regardless of frames_per_block.
-    let unit =
-      if d.kind == akImaQt:
-        if d.buf.specOf().channels.channelCount() == 1: 64'u64 else: 128'u64
-      else:
-        d.framesPerBlock.uint64
-    let total = (pkt.blockDur().get div unit * unit).int
+    let total = d.packetTotal(pkt.blockDur())
     d.decodeFrames(pkt.data, total)
   except AudioError as e:
     d.buf.clearSamples()

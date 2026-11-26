@@ -17,6 +17,7 @@ import ./../codecs
 import ./../errors
 import ./../io
 import ./../packet
+import ./../source
 import ./../units
 
 type
@@ -159,7 +160,7 @@ type
     lpcOrder*: int
     lpcCoeffs*: array[32, int32]
 
-proc readAlacElementChannel*(bs: var LtrBitReader; cookie: AlacCookie;
+proc readAlacElementChannel*[L](bs: var L; cookie: AlacCookie;
     bps: int): AlacElementChannel =
   try:
     result.mode = bs.readLtrBits(4).int
@@ -177,7 +178,7 @@ proc readAlacElementChannel*(bs: var LtrBitReader; cookie: AlacCookie;
 proc lg3a*(v: uint32): uint32 {.inline.} =
   31'u32 - countLeadingZeroBits((v shr 9) + 3).uint32
 
-proc readLtrUnaryCapped(bs: var LtrBitReader; cap: int): int =
+proc readLtrUnaryCapped[L](bs: var L; cap: int): int =
   ## Counts leading 1 bits up to `cap`; the terminating 0 is consumed
   ## unless the cap is reached.
   while result < cap:
@@ -190,7 +191,7 @@ proc readLtrUnaryCapped(bs: var LtrBitReader; cap: int): int =
       return
     inc result
 
-proc readRiceCode*(bs: var LtrBitReader; k, bps: uint32): uint32 =
+proc readRiceCode*[L](bs: var L; k, bps: uint32): uint32 =
   let prefix = readLtrUnaryCapped(bs, 9).uint32
   if prefix > 8:
     try:
@@ -221,7 +222,7 @@ proc riceToSigned*(v: uint32): int32 {.inline.} =
 proc clipMsbs*(v: int32; n: int): int32 {.inline.} =
   (v shl n) shr n
 
-proc readResiduals*(bs: var LtrBitReader; e: var AlacElementChannel;
+proc readResiduals*[L](bs: var L; e: var AlacElementChannel;
     dst: var openArray[int32]) =
   var mb = e.mb
   var signToggle = 0'u32
@@ -302,7 +303,7 @@ proc decorrelateMidSide(s0, s1: var openArray[int32]; weight: int32;
 
 # ------------------------------------------------------------ frame ---
 
-proc decodeSceOrCpe*(cookie: AlacCookie; bs: var LtrBitReader;
+proc decodeSceOrCpe*[L](cookie: AlacCookie; bs: var L;
     tails: var openArray[uint16]; out0: var openArray[int32];
     out1: var openArray[int32]; hasOut1: bool): int =
   let isCpe = hasOut1
@@ -423,8 +424,8 @@ proc newAlacDecoder*(params: AudioCodecParameters;
     tails: newSeq[uint16](maxTails), spec: spec,
     buf: newAudioSamples(sfS32, spec, cookie.frameLength.int))
 
-proc decodeAlacPacket(d: AlacDecoder; data: seq[uint8]) =
-  var bs = newLtrBitReader(data)
+proc decodeAlacData[L](d: AlacDecoder; bs: var L) =
+  ## Packet core over any MSB-first bit cursor (owning or view).
   let nch = d.cookie.numChannels
   var nextCh = 0
   var numFrames = 0
@@ -486,6 +487,28 @@ proc decodeAlacPacket(d: AlacDecoder; data: seq[uint8]) =
       for i in 0 ..< numFrames:
         d.buf.s32.planes[p][i] = d.buf.s32.planes[p][i] shl shift
 
+proc decodeAlacPacket(d: AlacDecoder; data: seq[uint8]) =
+  ## Owning entry: copies `data` into a cached reader (as before).
+  var bs = newLtrBitReader(data)
+  d.decodeAlacData(bs)
+
+proc decodeAlacView*(d: AlacDecoder; src: MappedSource; off, len: int) =
+  ## Zero-copy decode straight from a mapping window. No packet or bit
+  ## reader copy; output still reuses the decoder's internal buffer.
+  var vr = viewReader(src, off, len)
+  var vbs = vr.restLtr()
+  d.decodeAlacData(vbs)
+
+proc applyGaplessTrims(d: AlacDecoder; trimStart, trimEnd: Duration) =
+  if d.opts.gapless and d.buf.framesOf() > 0:
+    let total = d.buf.framesOf()
+    let dropFirst = min(trimStart.get.int, total)
+    let keep = total - dropFirst
+    let dropLast = min(trimEnd.get.int, keep)
+    if dropFirst > 0 or dropLast > 0:
+      d.buf.s32.shift(dropFirst)
+      d.buf.s32.truncate(d.buf.s32.numFrames - dropLast)
+
 method codecParams*(d: AlacDecoder): AudioCodecParameters = d.params
 
 method reset*(d: AlacDecoder) =
@@ -503,14 +526,24 @@ method decodePacket*(d: AlacDecoder; pkt: Packet): AudioSamples =
   except IndexDefect, RangeDefect:
     d.buf.clearSamples()
     raise decodeError("alac: invalid bitstream")
-  if d.opts.gapless and d.buf.framesOf() > 0:
-    let total = d.buf.framesOf()
-    let dropFirst = min(pkt.trimStart.get.int, total)
-    let keep = total - dropFirst
-    let dropLast = min(pkt.trimEnd.get.int, keep)
-    if dropFirst > 0 or dropLast > 0:
-      d.buf.s32.shift(dropFirst)
-      d.buf.s32.truncate(d.buf.s32.numFrames - dropLast)
+  d.applyGaplessTrims(pkt.trimStart, pkt.trimEnd)
+  d.buf
+
+proc decodePacketView*(d: AlacDecoder; v: PacketView): AudioSamples =
+  ## View-based `decodePacket`: identical output (incl. gapless trims),
+  ## no packet copy.
+  try:
+    d.decodeAlacView(v.src, v.off, v.len)
+  except AudioError as e:
+    d.buf.clearSamples()
+    raise e
+  except EndOfStream:
+    d.buf.clearSamples()
+    raise decodeError("alac: truncated packet")
+  except IndexDefect, RangeDefect:
+    d.buf.clearSamples()
+    raise decodeError("alac: invalid bitstream")
+  d.applyGaplessTrims(v.trimStart, v.trimEnd)
   d.buf
 
 method lastDecoded*(d: AlacDecoder): AudioSamples = d.buf

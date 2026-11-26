@@ -6,6 +6,8 @@ import audio/audio
 import audio/codecs
 import audio/codecs/flac
 import audio/codecs/aac
+import audio/codecs/adpcm
+import audio/codecs/alac
 import audio/codecs/mpa
 import audio/codecs/pcm
 import audio/formats
@@ -132,6 +134,42 @@ proc collectAacMapped(w: Mp4MappedReader; dec: AacDecoder): seq[seq[float32]] =
     for p in 0 ..< nch:
       for i in 0 ..< s.framesOf():
         result[p].add(s.f32.planes[p][i])
+
+proc collectAdpcmMapped(w: WavMappedReader;
+    dec: AdpcmDecoder): AudioSamples =
+  ## Decodes every block window with zero packet copies.
+  var frames = 0
+  var first = true
+  while true:
+    let v = w.nextPacketView()
+    if v.isNone:
+      break
+    let s = dec.decodePacketView(v.get)
+    if first:
+      result = newAudioSamples(s.format, s.specOf(), 0)
+      first = false
+    result.s32.growCapacity(frames + s.framesOf())
+    for p in 0 ..< s.s32.planes.len:
+      for i in 0 ..< s.framesOf():
+        result.s32.planes[p][frames + i] = s.s32.planes[p][i]
+    result.s32.numFrames = frames + s.framesOf()
+    frames += s.framesOf()
+
+proc collectAlacMapped(w: Mp4MappedReader; dec: AlacDecoder): seq[seq[int32]] =
+  ## Decodes every ALAC sample window with zero packet copies.
+  let nch = w.tracks[0].codec.channels.get.channelCount()
+  result = newSeq[seq[int32]](nch)
+  for p in 0 ..< nch:
+    result[p] = @[]
+  doAssert w.tracks[0].codec.codec == CodecAlac
+  while true:
+    let v = w.nextPacketView()
+    if v.isNone:
+      break
+    let s = dec.decodePacketView(v.get)
+    for p in 0 ..< nch:
+      for i in 0 ..< s.framesOf():
+        result[p].add(s.s32.planes[p][i])
 
 suite "streaming wav":
   test "mapped open matches in-memory header":
@@ -277,6 +315,74 @@ suite "streaming wav":
     r.ignoreBytes(3)
     check v.readByte() == r.readByte()
     check v.getPos() == r.getPos()
+
+suite "streaming adpcm":
+  test "mapped ms decode matches owning decode":
+    let src = rampS16(3_000)
+    let bytes = encodeWav(src, 44_100, CodecAdpcmMs)
+    let path = getTempDir() / "audio_stream_ms.wav"
+    writeFile(path, cast[string](bytes))
+    try:
+      let mem = openWav(bytes)
+      let mdec = newAdpcmDecoder(mem.params)
+      var want: seq[seq[int32]] = @[]
+      var total = 0
+      while true:
+        let pkt = mem.nextPacket()
+        if pkt.isNone:
+          break
+        let s = mdec.decodePacket(pkt.get)
+        if total == 0:
+          want = newSeq[seq[int32]](s.s32.planes.len)
+        for p in 0 ..< s.s32.planes.len:
+          for i in 0 ..< s.framesOf():
+            want[p].add(s.s32.planes[p][i])
+        total += s.framesOf()
+      let w = openWavMapped(path)
+      try:
+        check w.params.codec == CodecAdpcmMs
+        let dec = newAdpcmDecoder(w.params)
+        let back = collectAdpcmMapped(w, dec)
+        check back.framesOf() == total
+        for p in 0 ..< want.len:
+          for i in 0 ..< total:
+            check back.s32.planes[p][i] == want[p][i]
+      finally:
+        w.close()
+    finally:
+      removeFile(path)
+
+  test "mapped ima decode matches owning decode":
+    let spec = newAudioSpec(44_100, discrete(1))
+    var src = newAudioSamples(sfS16, spec, 2_000)
+    src.s16.renderWith(2_000, i):
+      src.s16.planes[0][i] = cast[int16]((i * 257) mod 65536 - 32768)
+    let bytes = encodeWav(src, 44_100, CodecAdpcmImaWav)
+    let path = getTempDir() / "audio_stream_ima.wav"
+    writeFile(path, cast[string](bytes))
+    try:
+      let mem = openWav(bytes)
+      let mdec = newAdpcmDecoder(mem.params)
+      var want = newSeq[int32]()
+      while true:
+        let pkt = mem.nextPacket()
+        if pkt.isNone:
+          break
+        let s = mdec.decodePacket(pkt.get)
+        for i in 0 ..< s.framesOf():
+          want.add(s.s32.planes[0][i])
+      let w = openWavMapped(path)
+      try:
+        check w.params.codec == CodecAdpcmImaWav
+        let dec = newAdpcmDecoder(w.params)
+        let back = collectAdpcmMapped(w, dec)
+        check back.framesOf() == want.len
+        for i in 0 ..< want.len:
+          check back.s32.planes[0][i] == want[i]
+      finally:
+        w.close()
+    finally:
+      removeFile(path)
 
 suite "streaming flac":
   test "mapped open matches in-memory header":
@@ -517,5 +623,39 @@ suite "streaming aac":
       let b = w.seek(seekToTimestamp(newTimestamp(20_000), tid))
       check b.actualTs == a.actualTs
       check w.nextPacketView().get.pts == mem.nextPacket().get.pts
+    finally:
+      w.close()
+
+suite "streaming alac":
+  const AlacFix = "tests/fixtures/fix_alacstereo.m4a"
+
+  test "mapped view decode is bit-exact":
+    let raw = readFile(AlacFix)
+    var bytes = newSeq[uint8](raw.len)
+    for i, c in raw:
+      bytes[i] = cast[uint8](c)
+    let mem = openMp4(bytes)
+    let mdec = newAlacDecoder(mem.tracks[0].codec)
+    var want = newSeq[seq[int32]](2)
+    want[0] = @[]
+    want[1] = @[]
+    while true:
+      let pkt = mem.nextPacket()
+      if pkt.isNone:
+        break
+      let s = mdec.decodePacket(pkt.get)
+      for p in 0 ..< 2:
+        for i in 0 ..< s.framesOf():
+          want[p].add(s.s32.planes[p][i])
+    let w = openMp4Mapped(AlacFix)
+    try:
+      check w.tracks[0].codec.codec == CodecAlac
+      let dec = newAlacDecoder(w.tracks[0].codec)
+      let back = collectAlacMapped(w, dec)
+      check back[0].len == want[0].len
+      check back[1].len == want[1].len
+      for i in 0 ..< want[0].len:
+        check back[0][i] == want[0][i]
+        check back[1][i] == want[1][i]
     finally:
       w.close()
