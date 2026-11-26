@@ -386,7 +386,16 @@ proc powThreeQuarters(q: float32): float32 {.inline.} =
 proc quantizeLine*(xr, factor: float32): int32 {.inline.} =
   if xr == 0.0 or factor == 0.0:
     return 0
-  let mag = powThreeQuarters(abs(xr) / factor)
+  let q = abs(xr) / factor
+  # Total on hostile floats: NaN/Inf quotients (NaN, Inf, or >1e30
+  # pushSamplesF32 input) must not trap on float->int conversion.
+  # Zero/negative quotients quantize to zero; saturate the rest to
+  # ±high(int32) (sign preserved, abs() stays safe downstream).
+  if q.classify in {fcNan, fcInf, fcNegInf} or q <= 0.0:
+    return 0
+  let mag = powThreeQuarters(q)
+  if mag.classify in {fcNan, fcInf, fcNegInf} or mag >= 2147483647.0'f32:
+    return if xr < 0.0: -high(int32) else: high(int32)
   let rounded = round(mag).int32
   if xr < 0.0: -rounded else: rounded
 
@@ -1206,8 +1215,10 @@ proc requantizeApprox*(q: array[576, int32]; ch: GranuleChannel;
     let b = (ch.scalefacs[bi] + pre) shl shift
     let p2 = pow(2.0, 0.25 * (a - b).float64).float32
     for k in s ..< min(e, 576):
-      result[k] = (if q[k] < 0: -1.0 else: 1.0) * mpaPow43[abs(q[k]).int] *
-        p2
+      # Clamp the table index: hostile saturated input can exceed the
+      # 8207-entry 4/3-power table (legit quantized lines never do).
+      result[k] = (if q[k] < 0: -1.0 else: 1.0) * mpaPow43[min(abs(q[k]).int,
+        mpaPow43.high)] * p2
     inc bi
   discard mult
 
@@ -1335,20 +1346,33 @@ const
 
 proc deriveIntensityPos*(lEnergy, rEnergy: float64): int =
   ## Annex G.2 c): NINT((12/pi)*atan(sqrt(EL/ER))), 0..6, 7 illegal never.
+  ## Non-finite/hostile energies fall back to 6 (same as the R-silent limit).
+  if rEnergy.classify in {fcNan, fcInf, fcNegInf} or
+      lEnergy.classify in {fcNan, fcInf, fcNegInf}:
+    return 6
   if rEnergy <= 0.0:
     return 6
   let ratio = sqrt(lEnergy / rEnergy)
+  if ratio.classify in {fcNan, fcInf, fcNegInf}:
+    return 6
   let pos = round(arctan(ratio) * 12.0 / PI)
+  if pos.classify in {fcNan, fcInf, fcNegInf}:
+    return 6
   clamp(pos.int, 0, 6)
 
 proc deriveIntensityPosLsf*(lEnergy, rEnergy: float64): int =
   ## §13818-3 power-law grid, closest in log space, 0..6.
   const A = 0.17328679513998632 # ln(2)*0.25
+  if rEnergy.classify in {fcNan, fcInf, fcNegInf} or
+      lEnergy.classify in {fcNan, fcInf, fcNegInf}:
+    return 6
   if rEnergy <= 0.0:
     return 6
   if lEnergy <= 0.0:
     return 5
   let target = ln(lEnergy / rEnergy) / (2.0 * A)
+  if target.classify in {fcNan, fcInf, fcNegInf}:
+    return 6
   const grid = [0.0, -1.0, 1.0, -2.0, 2.0, -3.0, 3.0]
   var best = 0
   var bestErr = Inf
@@ -2593,6 +2617,15 @@ proc finishEncoder*(e: Mp3Encoder): seq[uint8] =
     minKbps = min(minKbps, kbps)
     let flen = frameLenFor(e.version, kbps, e.sampleRateHz, pad)
     let slot = flen - 4 - crcBytes - siLen
+    # Soundness gate: the assembled main data (scalefactors + Huffman,
+    # all granule-channels) must fit the frame slot. The per-channel
+    # gain searches budget part3 only (with floors that keep tiny
+    # budgets searchable), so an infeasible config (e.g. stereo at a
+    # few kbit/s, or forced short blocks below the part2 floor) is
+    # rejected here instead of emitting a desynchronizing long frame.
+    # The VBR picker above guarantees the same invariant by selection.
+    if f.mainData.len > slot:
+      raise unsupportedError("mp3enc: frame does not fit slot (raise bitrate)")
     # Header.
     var bi = e.bitrateIdx
     for k in 1 ..< 15:

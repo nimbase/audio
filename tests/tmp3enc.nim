@@ -319,6 +319,15 @@ suite "mp3 encoder vbr/crc/xing":
       check false
     except AudioError as e:
       check e.kind == ekUnsupported
+    # Infeasible slots fail cleanly at finish time, never as corrupt frames.
+    try:
+      let e = newMp3EncoderCbr(8, 24_000, MpaMode(kind: mmStereo))
+      e.pushSamplesI16(toS16Interleaved(
+        sineStereo(1152, 440.0, 660.0, 0.4, 22050)))
+      discard e.finishEncoder()
+      check false
+    except AudioError as e:
+      check e.kind == ekUnsupported
 
 suite "mp3 encoder intensity":
   test "is-only, ms+is and auto+is gapless exact":
