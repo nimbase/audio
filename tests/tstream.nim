@@ -1,8 +1,10 @@
 import std/options
 import std/os
+import std/strutils
 import unittest
 
 import audio/audio
+import audio/checksum
 import audio/codecs
 import audio/codecs/flac
 import audio/codecs/aac
@@ -138,6 +140,16 @@ proc collectAacMapped(w: Mp4MappedReader; dec: AacDecoder): seq[seq[float32]] =
       for i in 0 ..< s.framesOf():
         result[p].add(s.f32.planes[p][i])
 
+proc writeTempBytes(path: string; bytes: seq[uint8]) =
+  ## Byte-exact temp file write (explicit byte overload, no string cast),
+  ## failing fast with sizes if the filesystem path ever corrupts.
+  writeFile(path, bytes)
+  let onDisk = getFileSize(path)
+  if onDisk != bytes.len:
+    echo "SIZE MISMATCH for ", path, ": disk=", onDisk,
+      " memory=", bytes.len
+  check onDisk == bytes.len
+
 proc collectAdpcmMapped(w: WavMappedReader;
     dec: AdpcmDecoder): AudioSamples =
   ## Decodes every block window with zero packet copies.
@@ -210,7 +222,7 @@ suite "streaming wav":
   test "mapped open matches in-memory header":
     let src = rampS16(5_000)
     let path = getTempDir() / "audio_stream_hdr.wav"
-    writeFile(path, cast[string](encodeWav(src, 44_100)))
+    writeTempBytes(path, encodeWav(src, 44_100))
     try:
       let mem = openWav(encodeWav(src, 44_100))
       let w = openWavMapped(path)
@@ -229,7 +241,7 @@ suite "streaming wav":
     let src = rampS16(50_000)
     let bytes = encodeWav(src, 44_100)
     let path = getTempDir() / "audio_stream_exact.wav"
-    writeFile(path, cast[string](bytes))
+    writeTempBytes(path, bytes)
     try:
       # Reference: in-memory path.
       let mem = openWav(bytes)
@@ -264,7 +276,7 @@ suite "streaming wav":
   test "mapped owning packets match views":
     let src = rampS16(9_000)
     let path = getTempDir() / "audio_stream_own.wav"
-    writeFile(path, cast[string](encodeWav(src, 44_100)))
+    writeTempBytes(path, encodeWav(src, 44_100))
     try:
       let w = openWavMapped(path)
       try:
@@ -290,7 +302,7 @@ suite "streaming wav":
   test "mapped seek lands on packet boundary":
     let src = rampS16(9_000)
     let path = getTempDir() / "audio_stream_seek.wav"
-    writeFile(path, cast[string](encodeWav(src, 44_100)))
+    writeTempBytes(path, encodeWav(src, 44_100))
     try:
       let w = openWavMapped(path)
       try:
@@ -305,7 +317,7 @@ suite "streaming wav":
   test "byte pool stays flat across packets":
     let src = rampS16(50_000)
     let path = getTempDir() / "audio_stream_pool.wav"
-    writeFile(path, cast[string](encodeWav(src, 44_100)))
+    writeTempBytes(path, encodeWav(src, 44_100))
     try:
       var pool = initStreamPool()
       let cap0 = pool.cap
@@ -356,7 +368,7 @@ suite "streaming adpcm":
     let src = rampS16(3_000)
     let bytes = encodeWav(src, 44_100, CodecAdpcmMs)
     let path = getTempDir() / "audio_stream_ms.wav"
-    writeFile(path, cast[string](bytes))
+    writeTempBytes(path, bytes)
     try:
       let mem = openWav(bytes)
       let mdec = newAdpcmDecoder(mem.params)
@@ -394,7 +406,7 @@ suite "streaming adpcm":
       src.s16.planes[0][i] = cast[int16]((i * 257) mod 65536 - 32768)
     let bytes = encodeWav(src, 44_100, CodecAdpcmImaWav)
     let path = getTempDir() / "audio_stream_ima.wav"
-    writeFile(path, cast[string](bytes))
+    writeTempBytes(path, bytes)
     try:
       let mem = openWav(bytes)
       let mdec = newAdpcmDecoder(mem.params)
@@ -420,11 +432,52 @@ suite "streaming adpcm":
       removeFile(path)
 
 suite "streaming flac":
+  test "mapped bytes equal memory bytes":
+    # Layer isolation: if the mapping disagrees with memory, no demuxer
+    # output can be trusted; fail here with the exact offset.
+    let src = rampS16(5_000)
+    let bytes = encodeFlacStream(src, 44_100)
+    let path = getTempDir() / "audio_stream_flac_bytes.flac"
+    writeTempBytes(path, bytes)
+    try:
+      let msrc = openMappedSource(path)
+      try:
+        check msrc.mappedLen == bytes.len
+        var bad = -1
+        for i in 0 ..< bytes.len:
+          if msrc.packetBytes(0, bytes.len)[i] != bytes[i]:
+            bad = i
+            break
+        if bad >= 0:
+          echo "BYTE MISMATCH at ", bad, ": mapped=",
+            msrc.packetBytes(0, bytes.len)[bad].toHex(2),
+            " memory=", bytes[bad].toHex(2)
+        check bad < 0
+        check crc16Ansi(msrc.packetBytes(0, bytes.len)) ==
+          crc16Ansi(bytes)
+        # Independent read-back: distinguishes a write-path fault
+        # (file on disk differs) from a mapping fault (disk matches
+        # but the view does not).
+        let back = readFile(path)
+        check back.len == bytes.len
+        var badDisk = -1
+        for i in 0 ..< bytes.len:
+          if cast[uint8](back[i]) != bytes[i]:
+            badDisk = i
+            break
+        if badDisk >= 0:
+          echo "DISK MISMATCH at ", badDisk
+        check badDisk < 0
+      finally:
+        msrc.close()
+    finally:
+      removeFile(path)
+
   test "mapped open matches in-memory header":
     let src = rampS16(5_000)
     let bytes = encodeFlacStream(src, 44_100)
     let path = getTempDir() / "audio_stream_flac_hdr.flac"
-    writeFile(path, cast[string](bytes))
+    writeTempBytes(path, bytes)
     try:
       let mem = openFlac(bytes)
       let w = openFlacMapped(path)
@@ -443,7 +496,7 @@ suite "streaming flac":
     let src = rampS16(20_000)
     let bytes = encodeFlacStream(src, 44_100)
     let path = getTempDir() / "audio_stream_flac.flac"
-    writeFile(path, cast[string](bytes))
+    writeTempBytes(path, bytes)
     try:
       let mem = openFlac(bytes)
       let mdec = newFlacDecoder(mem.params,
@@ -468,7 +521,7 @@ suite "streaming flac":
   test "mapped owning packets match views":
     let src = rampS16(9_000)
     let path = getTempDir() / "audio_stream_flac_own.flac"
-    writeFile(path, cast[string](encodeFlacStream(src, 44_100)))
+    writeTempBytes(path, encodeFlacStream(src, 44_100))
     try:
       let w = openFlacMapped(path)
       try:
@@ -494,7 +547,7 @@ suite "streaming flac":
   test "mapped seek lands on frame boundary":
     let src = rampS16(20_000)
     let path = getTempDir() / "audio_stream_flac_seek.flac"
-    writeFile(path, cast[string](encodeFlacStream(src, 44_100)))
+    writeTempBytes(path, encodeFlacStream(src, 44_100))
     try:
       let w = openFlacMapped(path)
       try:
