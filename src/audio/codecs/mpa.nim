@@ -16,6 +16,7 @@ import ./../io
 import ./../packet
 import ./../source
 import ./../units
+import ./../vec
 import ./mpa_tables
 
 # ------------------------------------------------------------------ header ---
@@ -699,10 +700,11 @@ proc synthesis*(state: var SynthState; nFrames: int;
     for j in 0 ..< 8:
       let vStart = state.vFront + (j shl 1)
       let k = j shl 6
-      for i in 0 ..< 32:
-        output[b * 32 + i] +=
-          state.vVec[(vStart + 0) and 0xf][i] * SynthesisD[k + i] +
-          state.vVec[(vStart + 1) and 0xf][32 + i] * SynthesisD[k + i + 32]
+      synthWindowAccum32Vec(output.toOpenArray(b * 32, b * 32 + 31),
+        state.vVec[(vStart + 0) and 0xf].toOpenArray(0, 31),
+        state.vVec[(vStart + 1) and 0xf].toOpenArray(32, 63),
+        SynthesisD.toOpenArray(k, k + 31),
+        SynthesisD.toOpenArray(k + 32, k + 63))
     state.vFront = (state.vFront + 15) and 0xf
 # ------------------------------------------------------------- layer 1 ---
 

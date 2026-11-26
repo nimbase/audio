@@ -12,6 +12,7 @@ import audio/formats/mpa as mpafmt
 import audio/io
 import audio/packet
 import audio/units
+import audio/vec
 
 const FixDir = "tests/fixtures/"
 
@@ -127,6 +128,32 @@ suite "mpa dsp units":
       for j in 0 ..< 32:
         acc += x[j].float64 * cos(PI / 32.0 * i.float64 * (j.float64 + 0.5))
       check abs(y[i].float64 - acc) < 1e-5
+
+  test "synthWindowAccum32Vec bit-matches scalar":
+    var s = 0x9E3779B9'u32
+    proc rnd(scale: float32): float32 =
+      s = s * 1664525'u32 + 1013904223'u32
+      (((s shr 16) and 0xFFFF'u32).int32 - 32768).float32 / 32768.0 *
+        scale
+    for trial in 0 ..< 20:
+      let scale = [0.01'f32, 1.0, 1000.0, 0.0][trial mod 4]
+      var vA = newSeq[float32](32)
+      var vB = newSeq[float32](32)
+      var dA = newSeq[float32](32)
+      var dB = newSeq[float32](32)
+      var init = newSeq[float32](32)
+      for i in 0 ..< 32:
+        vA[i] = rnd(scale)
+        vB[i] = rnd(scale)
+        dA[i] = rnd(1.0)
+        dB[i] = rnd(1.0)
+        init[i] = rnd(scale)
+      var got = init
+      var want = init
+      synthWindowAccum32Vec(got, vA, vB, dA, dB)
+      for i in 0 ..< 32:
+        want[i] += vA[i] * dA[i] + vB[i] * dB[i]
+      check got == want
 
   test "imdct36 matches analytical":
     const TV = [0.0976'f32, 0.9321, 0.6138, 0.0857, 0.0433, 0.4855,
