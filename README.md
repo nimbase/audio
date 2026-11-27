@@ -343,6 +343,9 @@ if probeWav(bytes) == 255:
   decoder semantics, tables, and test vectors ported from their code.
 - Sun Microsystems `g711.c` (unrestricted use): A-law/mu-law transfer
   functions adapted from it.
+- [oxideav-mp3](https://github.com/OxideAV/oxideav-mp3): reference for
+  the MP3 encoder (intensity stereo, Model-2 psychoacoustics,
+  outer loop).
 
 ### ❤ Contributions & Support
 - 🐛 Found a bug? [Create a new Issue](https://github.com/nimbase/audio/issues)
