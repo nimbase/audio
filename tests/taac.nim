@@ -6,6 +6,7 @@ import audio/audio
 import audio/codecs
 import audio/codecs/aac
 import audio/codecs/aac_tables
+import audio/codecs/aacenc
 import audio/dsp
 import audio/errors
 import audio/formats
@@ -485,3 +486,83 @@ suite "adts framing":
       check e.kind == ekDecode
       raisedCfg = true
     check raisedCfg
+
+suite "aac encoder skeleton":
+  proc toneS16(n: int; stereo: bool): AudioSamples =
+    let spec = newAudioSpec(44_100,
+      if stereo: ChStereo else: positioned(PosFrontCenter))
+    result = newAudioSamples(sfS16, spec, n)
+    result.s16.renderWith(n, i):
+      result.s16.planes[0][i] = (0.4 * 32767.0 *
+        sin(2.0 * PI * 440.0 * i.float / 44100.0)).int16
+      if stereo:
+        result.s16.planes[1][i] = (0.4 * 32767.0 *
+          sin(2.0 * PI * 660.0 * i.float / 44100.0)).int16
+
+  proc decodeAllZero(bytes: seq[uint8]; nch: int): int =
+    let w = openAac(bytes)
+    let dec = newAacDecoder(w.tracks[0].codec,
+      AudioDecoderOptions(gapless: true, verify: false))
+    var frames = 0
+    while true:
+      let pkt = w.nextPacket()
+      if pkt.isNone:
+        break
+      let got = dec.decodePacket(pkt.get)
+      check got.framesOf() == 1024
+      for c in 0 ..< nch:
+        for i in 0 ..< 1024:
+          if got.f32.planes[c][i] != 0.0:
+            checkpoint("nonzero at ch=" & $c & " i=" & $i)
+            check false
+      inc frames
+    frames
+
+  test "silent blocks have exact byte sizes":
+    check aacSilentRawBlock(1).len == 4
+    check aacSilentRawBlock(2).len == 7
+    var raised = false
+    try:
+      discard aacSilentRawBlock(3)
+    except AudioError as e:
+      check e.kind == ekUnsupported
+      raised = true
+    check raised
+
+  test "stereo silence roundtrips to exact zeros":
+    let bytes = encodeAacStream(toneS16(3 * 1024, true),
+      defaultAacEncoderOptions(44_100, 2))
+    check probeAac(bytes) == 255
+    check bytes.len == 3 * (7 + 7)
+    check decodeAllZero(bytes, 2) == 3
+
+  test "mono silence roundtrips, tail pads to 1024":
+    let bytes = encodeAacStream(toneS16(2 * 1024, false),
+      defaultAacEncoderOptions(44_100, 1))
+    check bytes.len == 2 * (7 + 4)
+    check decodeAllZero(bytes, 1) == 2
+    let tail = encodeAacStream(toneS16(1500, false),
+      defaultAacEncoderOptions(48_000, 1))
+    check decodeAllZero(tail, 1) == 2
+
+  test "hostile configs raise cleanly, empty stays empty":
+    for (rate, ch) in [(44101'u32, 2), (0'u32, 2), (44_100'u32, 3),
+        (44_100'u32, 0)]:
+      var raised = false
+      try:
+        discard encodeAacStream(toneS16(1024, true),
+          defaultAacEncoderOptions(rate, ch))
+      except AudioError:
+        raised = true
+      check raised
+    var ragged = false
+    try:
+      let e = newAacEncoder(defaultAacEncoderOptions(44_100, 2))
+      e.pushSamplesI16(@[1'i16, 2, 3])
+    except AudioError as e:
+      check e.kind == ekDecode
+      ragged = true
+    check ragged
+    let empty = encodeAacStream(toneS16(0, true),
+      defaultAacEncoderOptions(44_100, 2))
+    check empty.len == 0

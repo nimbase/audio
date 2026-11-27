@@ -13,6 +13,7 @@ import std/options
 import ./../audio
 import ./../codecs
 import ./../codecs/aac
+import ./../codecs/aacenc
 import ./../errors
 import ./../formats
 import ./../io
@@ -143,6 +144,34 @@ proc encodeAdtsFrame*(payload: openArray[uint8]; rateIdx, channels: uint8;
     result[i] = hb[i]
   for i in 0 ..< payload.len:
     result[7 + i] = payload[i]
+
+proc adtsRateIdxOf*(rate: uint32): uint8 =
+  ## Table 1.18 index for an ADTS-signallable rate.
+  for i, r in Mpeg4SampleRates:
+    if r == rate:
+      return i.uint8
+  raise unsupportedError("aac: sample rate not ADTS-signallable")
+
+proc encodeAacStream*(samples: AudioSamples;
+    opts: AacEncoderOptions): seq[uint8] =
+  ## Whole-stream AAC-LC encode (Step B: silent frames) as ADTS.
+  ## Requires `sfS16` input with `opts.channels` channels.
+  if samples.format != sfS16:
+    raise unsupportedError("aacenc: only s16 input supported")
+  let nch = samples.specOf().channels.channelCount()
+  if nch != opts.channels:
+    raise unsupportedError("aacenc: sample/channel-count mismatch")
+  let e = newAacEncoder(opts)
+  let n = samples.framesOf()
+  var inter = newSeq[int16](n * opts.channels)
+  for i in 0 ..< n:
+    for c in 0 ..< opts.channels:
+      inter[i * opts.channels + c] = samples.s16.planes[c][i]
+  e.pushSamplesI16(inter)
+  let rateIdx = adtsRateIdxOf(opts.sampleRateHz)
+  let chcfg = opts.channels.uint8
+  for blk in e.finishEncoder():
+    result.add(encodeAdtsFrame(blk, rateIdx, chcfg))
 
 proc probeAac*(data: openArray[uint8]): int =
   if data.len < 7:
