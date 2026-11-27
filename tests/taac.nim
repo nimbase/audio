@@ -9,6 +9,7 @@ import audio/codecs/aac_tables
 import audio/dsp
 import audio/errors
 import audio/formats
+import audio/formats/aac as aacfmt
 import audio/formats/mp4 as mp4fmt
 import audio/io
 import audio/packet
@@ -346,3 +347,141 @@ suite "aac decode fixtures":
       worst = max(worst,
         abs(got[0][i + 1024].float64 * 32768.0 - refs[0][i].float64))
     check worst <= 2.0
+
+suite "adts framing":
+  test "header writer roundtrips, edges reject cleanly":
+    for rate in 0'u8 .. 12'u8:
+      for ch in [1'u8, 2]:
+        for flen in [7, 8, 100, 8191]:
+          let h = AdtsHeader(profile: 1, rateIdx: rate, channels: ch,
+            frameLen: flen, hasCrc: false, numBlocks: 1)
+          let bytes = writeAdtsHeader(h)
+          # Pad to the declared length: parse validates full presence.
+          var frame = newSeq[uint8](flen)
+          for i in 0 ..< 7:
+            frame[i] = bytes[i]
+          let p = parseAdtsHeader(frame, 0)
+          check p.profile == 1
+          check p.rateIdx == rate
+          check p.channels == ch
+          check p.frameLen == flen
+          check not p.hasCrc
+          check p.numBlocks == 1
+          check adtsRate(rate) == Mpeg4SampleRates[rate]
+    for bad in [0, 6, 8192]:
+      var raised = false
+      try:
+        discard writeAdtsHeader(AdtsHeader(profile: 1, rateIdx: 4,
+          channels: 2, frameLen: bad, hasCrc: false, numBlocks: 1))
+      except AudioError:
+        raised = true
+      check raised
+    var raisedRate = false
+    try:
+      discard adtsRate(13)
+    except AudioError:
+      raisedRate = true
+    check raisedRate
+
+  test "asc synth matches the canonical 44.1k stereo bytes":
+    let h = AdtsHeader(profile: 1, rateIdx: 4, channels: 2,
+      frameLen: 100, hasCrc: false, numBlocks: 1)
+    check adtsAsc(h) == @[0x12'u8, 0x10'u8]
+    var raisedProf = false
+    try:
+      discard adtsAsc(AdtsHeader(profile: 0, rateIdx: 4, channels: 2,
+        frameLen: 100, hasCrc: false, numBlocks: 1))
+    except AudioError as e:
+      check e.kind == ekUnsupported
+      raisedProf = true
+    check raisedProf
+
+  test "muxed frames demux to identical payloads with 1024 pts":
+    var payloads: seq[seq[uint8]] = @[]
+    for f in 0 ..< 5:
+      var p = newSeq[uint8](50 + f * 37)
+      for i in 0 ..< p.len:
+        p[i] = ((f * 131 + i * 17) and 0xFF).uint8
+      payloads.add(p)
+    var stream: seq[uint8] = @[]
+    for p in payloads:
+      stream.add(encodeAdtsFrame(p, 4, 2))
+    check probeAac(stream) == 255
+    let w = openAac(stream)
+    check w.tracks.len == 1
+    check w.tracks[0].codec.codec == CodecAac
+    check w.tracks[0].codec.sampleRate.get == 44_100
+    check w.tracks[0].codec.channels.get == ChStereo
+    # Decoder accepts the synthesized params (proves the ASC bytes).
+    let dec = newAacDecoder(w.tracks[0].codec,
+      AudioDecoderOptions(gapless: true, verify: false))
+    discard dec
+    var n = 0
+    while true:
+      let pkt = w.nextPacket()
+      if pkt.isNone:
+        break
+      check pkt.get.data == payloads[n]
+      check pkt.get.pts == newTimestamp(n.int64 * 1024)
+      check pkt.get.dur == newDuration(1024)
+      inc n
+    check n == 5
+
+  test "crc-form frames slice, hostile bytes raise cleanly":
+    var payload = newSeq[uint8](64)
+    for i in 0 ..< 64:
+      payload[i] = i.uint8
+    var frame = encodeAdtsFrame(payload, 4, 2)
+    # Flip to CRC form: protection_absent = 0, +2 bytes, length + 2.
+    frame[1] = frame[1] and 0xFE'u8
+    let crcFrame = frame[0 ..< 7] & @[0x12'u8, 0x34'u8] & frame[7 .. ^1]
+    let flen = crcFrame.len
+    var hdr = crcFrame
+    hdr[3] = (hdr[3] and 0xFC'u8) or ((flen shr 11) and 0x03).uint8
+    hdr[4] = ((flen shr 3) and 0xFF).uint8
+    hdr[5] = (((flen and 0x07) shl 5) or 0x1F).uint8
+    let p = parseAdtsHeader(hdr, 0)
+    check p.hasCrc
+    check p.frameLen == flen
+    let w = openAac(hdr)
+    let pkt = w.nextPacket()
+    check pkt.isSome
+    check pkt.get.data == payload
+    check w.nextPacket().isNone
+    # Garbage never escapes as a non-AudioError.
+    for g in [@[], @[0xFF'u8], @[0xFF'u8, 0xF1'u8],
+        @[0xFF'u8, 0xF1'u8, 0x50'u8, 0x80'u8]]:
+      var raised = false
+      try:
+        discard openAac(g)
+      except AudioError:
+        raised = true
+      check raised
+    # Truncated frame: sync + short payload.
+    var raisedTrunc = false
+    try:
+      discard openAac(encodeAdtsFrame(payload, 4, 2)[0 ..< 20])
+    except AudioError:
+      raisedTrunc = true
+    check raisedTrunc
+    # Multi-block frame rejected at open.
+    var mb = encodeAdtsFrame(payload, 4, 2)
+    mb[6] = mb[6] or 0x01'u8
+    var raisedMb = false
+    try:
+      discard openAac(mb)
+    except AudioError as e:
+      check e.kind == ekUnsupported
+      raisedMb = true
+    check raisedMb
+    # Mid-stream config change rejected (probe passes on the first
+    # two frames; the scan trips on the third).
+    var mixed = encodeAdtsFrame(payload, 4, 2) &
+      encodeAdtsFrame(payload, 4, 2) & encodeAdtsFrame(payload, 3, 2)
+    var raisedCfg = false
+    try:
+      discard openAac(mixed)
+    except AudioError as e:
+      check e.kind == ekDecode
+      raisedCfg = true
+    check raisedCfg
