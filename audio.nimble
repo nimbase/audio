@@ -2,7 +2,7 @@
 
 version       = "0.1.0"
 author        = "George Lemon"
-description   = "Pure-Nim audio encoders/decoders: PCM, ADPCM, FLAC, Vorbis, MP3, AAC, ALAC (Symphonia port + encoders)"
+description   = "Pure Nim audio encoders and decoders: WAV, FLAC, Vorbis, MP3, AAC, ALAC, AIFF, CAF"
 license       = "MPL-2.0"
 srcDir        = "src"
 
