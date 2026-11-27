@@ -1,6 +1,6 @@
 <p align="center">
   Pure-Nim audio encoders and decoders, no C bindings.<br>
-  Decode <i>and</i> encode WAV/PCM/ADPCM today; FLAC, Vorbis, MP3, AAC, ALAC, AIFF, CAF, MKV/WebM decode.
+  Decode and encode WAV/PCM/ADPCM, FLAC, Vorbis, MP3, AAC, ALAC, AIFF, CAF, MKV/WebM.
 </p>
 
 <p align="center">
@@ -323,11 +323,12 @@ if probeWav(bytes) == 255:
   SIMD window kernels (SSE2 via `nimsimd`, scalar fallback,
   `-d:vecScalar`)
 - [ ] Later: WavPack unsupported stub (tested + documented),
-  pure-Nim Opus + HE-AAC ports (fixture/matrix validation),
-  streaming I/O for the remaining formats, encoder-side perf
-  (Huffman table-select hotspot behind the ~0.1x noise encode,
-  Bark/MDCT SIMD), further decode kernels (dct32, imdct36) if
-  profiling justifies them
+  encoders for the decode-only codecs (Vorbis, AAC, ALAC) plus
+  AIFF/CAF muxers, pure-Nim Opus + HE-AAC ports (fixture/matrix
+  validation), streaming I/O for the remaining formats,
+  encoder-side perf (Huffman table-select hotspot behind the
+  ~0.1x noise encode, Bark/MDCT SIMD), further decode kernels
+  (dct32, imdct36) if profiling justifies them
 
 ### ❤ Credits
 
