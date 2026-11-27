@@ -3,7 +3,7 @@
 Reproducible commands (run from the package root):
 
 ```sh
-clue build benchmarks/bmp3.nim --out:/tmp/bmp3 --release
+nimble build -d:release benchmarks/bmp3.nim --out:/tmp/bmp3
 /tmp/bmp3
 ```
 `bmp3.nim` encodes + decodes deterministic fixtures (5 s stereo tones
@@ -13,16 +13,11 @@ wall time per cell plus output size. Best-of-N keeps scheduling
 jitter out of the comparison; use the same binary and fixtures
 when re-measuring.
 
-## Baseline — 2026-11-27 (no-dup fix)
+## Baseline
 
-Machine: macOS (amd64 build), Nim 2.4.0,
-`clue build --release`. Follows the huff-cache fix; the remaining
-per-pair cost (seq duplication on the shared cache vectors, found
-by reading the generated C) now indexes the cache directly, again
-with bit-identical output.
+Follows the huff-cache fix; the remaining per-pair cost (seq duplication on the shared cache vectors, found by reading the generated C) now indexes the cache directly, again with bit-identical output.
 
 ```text
-nim 2.4.0  hostOS=macosx  cpu=amd64
 --- sine stereo 44.1k (5.0 s audio) ---
 cbr128                 enc   0.41 s  dec   27 ms     80666 B
 outer                  enc   0.42 s  dec   28 ms     80666 B
@@ -61,7 +56,7 @@ Notes:
 Reproducible commands (run from the package root):
 
 ```sh
-clue build benchmarks/bcodecs.nim --out:/tmp/bcodecs --release
+nimble build -d:release benchmarks/bcodecs.nim --out:/tmp/bcodecs
 /tmp/bcodecs
 ```
 
@@ -81,10 +76,6 @@ agrees (wav 1.7 vs 1.2 ms, AAC 1.157 vs 1.154 s on the same work).
 MP3 preset detail stays in `bmp3.nim`; this file compares formats.
 
 ## Baseline — 2026-11-27
-
-```text
-nim 2.4.0  hostOS=macosx  cpu=amd64
-```
 
 Encode, 44.1 kHz stereo (time spent per cell):
 
