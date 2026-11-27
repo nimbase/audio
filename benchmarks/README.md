@@ -13,31 +13,31 @@ wall time as audio-seconds per wall-second (× realtime) plus output
 size. Best-of-N keeps scheduling jitter out of the comparison; use the
 same binary and fixtures when re-measuring.
 
-## Baseline — 2026-11-26
+## Baseline — 2026-11-27 (huff-cache fix)
 
 Machine: macOS (amd64 build), Nim 2.4.0,
-`clue build --release`, measured 2026-11-26 on the pre-SIMD tree
-(scalar synthesis/overlap-add). Decode figures below therefore
-predate the SSE2 window kernels in `src/audio/vec.nim`, which add
-about 1.1x end-to-end on MP3 decode (170x → 189x on the 128k
-stereo cell); use `-d:vecScalar` to reproduce scalar numbers.
+`clue build --release`. Follows the SIMD window kernels in
+`src/audio/vec.nim` (`-d:vecScalar` reproduces scalar synthesis).
+Sizes are bit-identical to the 2026-11-26 baseline: the cache
+changes timing only (proven by stash-and-compare on six encoder
+configs plus these tables).
 
 ```text
 nim 2.4.0  hostOS=macosx  cpu=amd64
 --- sine stereo 44.1k ---
-cbr128                 enc     1.9x  dec   178.2x     80666 B
-outer                  enc     1.8x  dec   175.2x     80666 B
-ltq                    enc     1.8x  dec   173.5x     80666 B
-qhigh(model2)          enc     1.8x  dec   157.5x     80666 B
-qfast                  enc     1.8x  dec   176.4x     80666 B
-jointauto              enc     2.1x  dec   176.1x     80666 B
-joint-is               enc     0.9x  dec   189.2x     80666 B
+cbr128                 enc     5.4x  dec   187.9x     80666 B
+outer                  enc     5.3x  dec   182.0x     80666 B
+ltq                    enc     5.2x  dec   179.9x     80666 B
+qhigh(model2)          enc     5.2x  dec   183.3x     80666 B
+qfast                  enc     5.3x  dec   178.2x     80666 B
+jointauto              enc     5.9x  dec   171.1x     80666 B
+joint-is               enc     6.1x  dec   198.0x     80666 B
 --- noise stereo 44.1k ---
-cbr128                 enc     0.1x  dec   332.3x     16718 B
-qhigh(model2)          enc     0.1x  dec   334.6x     16718 B
+cbr128                 enc     0.3x  dec   365.1x     16718 B
+qhigh(model2)          enc     0.3x  dec   367.5x     16718 B
 --- mono 44.1k / lsf 22.05k ---
-mono64                 enc     1.2x  dec   354.8x     40333 B
-lsf64                  enc     2.6x  dec   380.1x     40542 B
+mono64                 enc     9.4x  dec   331.1x     40333 B
+lsf64                  enc     8.8x  dec   400.7x     40542 B
 ```
 
 Notes:
@@ -48,12 +48,13 @@ Notes:
   every threshold, so all variants emit the same bits. The loop is a
   safety net that only steers on tight budgets / difficult spectra
   (covered by `outerLoopSearchLong` unit tests in `tests/tmp3enc.nim`).
-- Noise encodes at ~0.1× realtime: the inner-loop gain scan evaluates
-  `chooseBestTableForRegion` per region per gain, and each pair-cost
-  query rebuilds its Huffman code vectors from the const tables
-  (`huffCodes` allocates per call). Known hotspot; no behavior change
-  attempted here — this baseline pins the pre-optimization numbers.
-- Decode runs at 130–380× realtime across configs; decode cost is
+- Noise encode was ~0.1× realtime before the huff-cache fix (the
+  inner-loop gain scan evaluated `chooseBestTableForRegion` per
+  region per gain, and each pair-cost query rebuilt its Huffman code
+  vectors from the const tables); caching the vectors per select
+  index took it to ~0.3x with bit-identical output. Remaining cost
+  is the gain scan itself plus quantization.
+- Decode runs at 170–400× realtime across configs; decode cost is
   dominated by the hybrid synthesis + bitstream reading, independent
   of which encoder preset produced the stream.
 
@@ -91,40 +92,41 @@ Encode, 44.1 kHz stereo:
 
 | Format    | Fixture  | Speed | Size   | Quality            | Max RSS |
 |-----------|----------|-------|--------|--------------------|---------|
-| WAV16     | sine 2 s | 1626x | 352844 | exact              | 3.2MiB  |
-| ADPCM-MS  | sine 2 s | 21x   | 92762  | worst 43, mean 5   | 3.3MiB  |
-| ADPCM-IMA | sine 2 s | 25x   | 90940  | worst 424, mean 47 | 3.3MiB  |
+| WAV16     | sine 2 s | 1753x | 352844 | exact              | 3.2MiB  |
+| ADPCM-MS  | sine 2 s | 24x   | 92762  | worst 43, mean 5   | 3.3MiB  |
+| ADPCM-IMA | sine 2 s | 28.5x | 90940  | worst 424, mean 47 | 3.3MiB  |
 | FLAC      | sine 2 s | 2.7x  | 52857  | exact-frames       | 5.3MiB  |
-| FLAC      | noise 1 s| 1.9x  | 165796 | exact-frames       | 5.6MiB  |
-| MP3 128k  | sine 2 s | 1.3x  | 33017  | 78.5 dB            | 8.3MiB  |
-| MP3 128k  | noise 1 s| 0.1x  | 17135  | 14.6 dB            | 8.4MiB  |
+| FLAC      | noise 1 s| 1.8x  | 165796 | exact-frames       | 5.6MiB  |
+| MP3 128k  | sine 2 s | 5.1x  | 33017  | 78.5 dB            | 8.4MiB  |
+| MP3 128k  | noise 1 s| 0.3x  | 17135  | 14.6 dB            | 8.4MiB  |
 | AAC 128k  | sine 1 s | 0.9x  | 5432   | 47.6 dB            | 8.4MiB  |
-| AAC 128k  | noise 1 s| 0.8x  | 85218  | 47.0 dB            | 8.8MiB  |
+| AAC 128k  | noise 1 s| 0.9x  | 85218  | 47.0 dB            | 8.9MiB  |
 
 Decode:
 
 | Source          | Speed | Max RSS |
 |-----------------|-------|---------|
-| wav16           | 1089x | 3.3MiB  |
-| adpcm-ms        | 1152x | 3.3MiB  |
-| adpcm-ima       | 1230x | 3.3MiB  |
-| flac sine       | 277x  | 5.4MiB  |
-| flac noise      | 474x  | 5.6MiB  |
-| mp3 sine        | 193x  | 8.4MiB  |
-| mp3 noise       | 384x  | 8.4MiB  |
-| aac sine        | 910x  | 8.5MiB  |
-| aac noise       | 348x  | 8.8MiB  |
-| vorbis fixture  | 171x  | 11.8MiB |
-| alac fixture    | 278x  | 11.8MiB |
-| aac-mp4 fixture | 695x  | 11.8MiB |
-| aiff fixture    | 4301x | 11.8MiB |
-| caf fixture     | 4277x | 11.9MiB |
+| wav16           | 1158x | 3.3MiB  |
+| adpcm-ms        | 1166x | 3.3MiB  |
+| adpcm-ima       | 1319x | 3.3MiB  |
+| flac sine       | 276x  | 5.4MiB  |
+| flac noise      | 460x  | 5.6MiB  |
+| mp3 sine        | 184x  | 8.4MiB  |
+| mp3 noise       | 363x  | 8.4MiB  |
+| aac sine        | 884x  | 8.5MiB  |
+| aac noise       | 349x  | 8.9MiB  |
+| vorbis fixture  | 171x  | 12.4MiB |
+| alac fixture    | 293x  | 12.5MiB |
+| aac-mp4 fixture | 658x  | 12.5MiB |
+| aiff fixture    | 4690x | 12.5MiB |
+| caf fixture     | 4662x | 12.5MiB |
 
 Conclusion:
 
-- Every encoder runs realtime except MP3 on noise (0.1x, Huffman
-  table-select hotspot) and AAC (0.8–0.9x, direct-form MDCT): the
-  two pinned optimization targets.
+- Every encoder runs realtime except MP3 on noise (0.3x, down to
+  the gain scan now that the Huffman table-select hotspot is
+  cached) and AAC (0.9x, direct-form MDCT): the two pinned
+  optimization targets.
 - Quality is near-transparent on tones (MP3 78.5 dB, AAC 47.6 dB)
   and solid on noise (MP3 14.6 dB on budget; AAC 47 dB at 5x the
   128k budget — no rate loop yet, Step D work).

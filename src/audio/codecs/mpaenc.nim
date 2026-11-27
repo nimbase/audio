@@ -443,7 +443,7 @@ proc quantizeShortBanded(`is`: var array[576, int32]; xr: openArray[float32];
         `is`[k] = quantizeLine(xr[k], g)
     inc bi
 
-proc quantizeGranuleFull*(xr: array[576, float32]; ch: var GranuleChannel;
+proc quantizeGranuleFull*(xr: openArray[float32]; ch: var GranuleChannel;
     sampleRateHz: uint32; version: MpegVersion): array[576, int32] =
   let mult = scalefacMultiplier(ch.scalefacScale)
   let idx = sampleRateIdxOf(sampleRateHz, version)
@@ -499,7 +499,8 @@ proc huffBase(sel: int): int {.inline.} =
 
 proc huffCodes(sel: int): tuple[codes: seq[uint32], bits: seq[uint32],
     wrap: int] =
-  ## (code, len) vectors + dimension for a select index.
+  ## (code, len) vectors + dimension for a select index. One-time
+  ## builder; hot paths use `cachedHuffCodes` below.
   let base = huffBase(sel)
   let wrap = MpegTableWrap[base]
   if wrap == 0:
@@ -543,11 +544,42 @@ proc bigTableReach*(sel: int): int =
   else:
     15 + ((1 shl linbits) - 1)
 
-proc bigPairBits*(sel: int; x, y: int32): Option[int] =
+var
+  huffCacheCodes: array[32, seq[uint32]]
+  huffCacheBits: array[32, seq[uint32]]
+  huffCacheWrap: array[32, int]
+  huffCacheReady = false
+
+proc initHuffCache() =
+  ## Builds every select-index vector once. Called lazily by
+  ## `cachedHuffCodes`; `newMp3Encoder` already runs `initMpaTables`,
+  ## so steady-state encode never allocates here.
+  if huffCacheReady:
+    return
+  huffCacheReady = true
+  for sel in 0 ..< 32:
+    let (codes, bits, wrap) = huffCodes(sel)
+    huffCacheCodes[sel] = codes
+    huffCacheBits[sel] = bits
+    huffCacheWrap[sel] = wrap
+
+proc cachedHuffCodes(sel: int): tuple[codes: seq[uint32],
+    bits: seq[uint32], wrap: int] {.inline.} =
+  ## Legacy accessor (kept for compatibility; hot paths index
+  ## `huffCache*` directly so no seq is ever duplicated).
+  if not huffCacheReady:
+    initHuffCache()
+  (huffCacheCodes[sel], huffCacheBits[sel], huffCacheWrap[sel])
+
+proc bigPairBits*(sel: int; x, y: int32): Option[int] {.inline.} =
   ## §C.1.5.4.4.8 cost of one pair (codeword + linbits ESC + signs).
+  ## Indexes the shared cache vectors directly: binding the seqs would
+  ## duplicate them per call (Nim seq assignment is a deep copy).
   if sel == 4 or sel == 14:
     return none(int)
-  let (codes, bits, wrap) = huffCodes(sel)
+  if not huffCacheReady:
+    initHuffCache()
+  let wrap = huffCacheWrap[sel]
   if wrap == 0:
     if x == 0 and y == 0:
       return some(0)
@@ -559,19 +591,19 @@ proc bigPairBits*(sel: int; x, y: int32): Option[int] =
   if xi >= wrap or yi >= wrap:
     return none(int)
   let i = xi * wrap + yi
-  if i >= codes.len:
+  if i >= huffCacheCodes[sel].len:
     return none(int)
-  if bits[i] == 0 and (xi != 0 or yi != 0):
+  if huffCacheBits[sel][i] == 0 and (xi != 0 or yi != 0):
     return none(int)
   let linbits = CodebookLinbits[sel]
-  var b = bits[i].int
+  var b = huffCacheBits[sel][i].int
   if ax >= 15: b += linbits
   if ay >= 15: b += linbits
   if x != 0: inc b
   if y != 0: inc b
   some(b)
 
-proc regionBitsWithTable*(`is`: array[576, int32]; start, stop,
+proc regionBitsWithTable*(`is`: openArray[int32]; start, stop,
     sel: int): Option[int] =
   var bits = 0
   var k = start
@@ -583,11 +615,11 @@ proc regionBitsWithTable*(`is`: array[576, int32]; start, stop,
     k += 2
   some(bits)
 
-proc maxAbsIs*(`is`: array[576, int32]; start, stop: int): int =
+proc maxAbsIs*(`is`: openArray[int32]; start, stop: int): int =
   for k in start ..< min(stop, 576):
     result = max(result, abs(`is`[k]).int)
 
-proc chooseBestTableForRegion*(`is`: array[576, int32]; start,
+proc chooseBestTableForRegion*(`is`: openArray[int32]; start,
     stop: int): Option[tuple[sel, bits: int]] =
   ## Cheapest codable codebook for a big-values region (reach-filtered).
   let m = maxAbsIs(`is`, start, stop)
@@ -599,7 +631,7 @@ proc chooseBestTableForRegion*(`is`: array[576, int32]; start,
       if result.isNone or b.get < result.get.bits:
         result = some((sel, b.get))
 
-proc chooseBestCount1Table*(`is`: array[576, int32]; start,
+proc chooseBestCount1Table*(`is`: openArray[int32]; start,
     stop: int): tuple[useB: bool, bits: int] =
   ## Cheapest count1 quad table (A vs B) over a quad range.
   var bitsA = 0
@@ -619,7 +651,7 @@ proc chooseBestCount1Table*(`is`: array[576, int32]; start,
     k += 4
   (bitsB < bitsA, min(bitsA, bitsB))
 
-proc partitionSplit*(`is`: array[576, int32]): tuple[bigPairs,
+proc partitionSplit*(`is`: openArray[int32]): tuple[bigPairs,
     count1Quads: int] =
   ## Trailing-zero strip, then trailing ±1 quads (rounded up to x4).
   var lastNz = -1
@@ -658,7 +690,7 @@ proc shortBandStarts*(sampleRateHz: uint32;
   for b in 0 ..< 13:
     result[b] = SfbShortBands[idx][b * 3] div 3
 
-proc countHuffmanBits*(`is`: array[576, int32]; bigPairs: int;
+proc countHuffmanBits*(`is`: openArray[int32]; bigPairs: int;
     r0, r1: int; tableSelect: array[3, int]; count1Quads: int;
     useB: bool): Option[int] =
   var bits = 0
@@ -687,7 +719,9 @@ proc countHuffmanBits*(`is`: array[576, int32]; bigPairs: int;
   some(bits)
 
 proc emitBigPair*(w: var BitWriter; sel: int; x, y: int32) =
-  let (codes, bits, wrap) = huffCodes(sel)
+  if not huffCacheReady:
+    initHuffCache()
+  let wrap = huffCacheWrap[sel]
   let ax = abs(x).int
   let ay = abs(y).int
   let xi = min(ax, 15)
@@ -695,8 +729,8 @@ proc emitBigPair*(w: var BitWriter; sel: int; x, y: int32) =
   if wrap == 0:
     return # table 0 all-zero pair: zero bits
   let i = xi * wrap + yi
-  if bits[i] != 0:
-    w.writeBits(codes[i], bits[i].int)
+  if huffCacheBits[sel][i] != 0:
+    w.writeBits(huffCacheCodes[sel][i], huffCacheBits[sel][i].int)
   let linbits = CodebookLinbits[sel]
   if ax >= 15 and linbits > 0:
     w.writeBits((ax - 15).uint32, linbits)
@@ -707,7 +741,7 @@ proc emitBigPair*(w: var BitWriter; sel: int; x, y: int32) =
   if y != 0:
     w.writeBit(y < 0)
 
-proc emitRegion*(w: var BitWriter; `is`: array[576, int32]; start, stop,
+proc emitRegion*(w: var BitWriter; `is`: openArray[int32]; start, stop,
     sel: int) =
   var k = start
   while k + 1 < stop and k + 1 < 576:
@@ -832,7 +866,7 @@ proc regionEndsFor*(ch: GranuleChannel; bigPairs: int;
     (r0, r1)
 
 proc searchBitBudgetBanded*(
-    xr: array[576, float32]; ch: var GranuleChannel; sampleRateHz: uint32;
+    xr: openArray[float32]; ch: var GranuleChannel; sampleRateHz: uint32;
     version: MpegVersion; budget: int): tuple[ok: bool,
     `is`: array[576, int32], bits: int] =
   ## Smallest gain whose band-aligned Huffman count fits `budget`.
@@ -1330,7 +1364,7 @@ proc outerLoopSearchLong*(xr: array[576, float32]; ch: var GranuleChannel;
 
 # -------------------------------------------------------- stereo (MS) ---
 
-proc msMatrixForward*(l, r: array[576, float32]): tuple[m, s: array[576,
+proc msMatrixForward*(l, r: openArray[float32]): tuple[m, s: array[576,
     float32]] =
   ## §2.4.3.4.9.2 forward MS matrix: M=(L+R)/sqrt2, S=(L-R)/sqrt2.
   const k = 0.7071067811865476'f32
@@ -1702,7 +1736,7 @@ proc bandTonality*(band: openArray[float32]): float64 =
     return 0.0
   clamp(1.0 - exp(logSum / band.len.float64) / arith, 0.0, 1.0)
 
-proc model2LongThresholds*(xr: array[576, float32]; sampleRateHz: uint32;
+proc model2LongThresholds*(xr: openArray[float32]; sampleRateHz: uint32;
     version: MpegVersion; offsetDb = 0.0): array[21, float64] =
   ## Signal-dependent masking thresholds per long band (Model-2-flavored):
   ## per-band MDCT energy + flatness tonality → TMN/NMT mask level →
@@ -1974,6 +2008,8 @@ type
     attack*: seq[AttackDetector]
     btSm*: seq[BlockTypeSM]
     pending*: seq[seq[float32]]
+    pendingOff*: array[2, int] ## Consumed prefix per channel (cursor:
+      ## `pending[ch][pendingOff[ch] .. ^1]` is the live queue).
     frames*: seq[Mp3PendingFrame]
     frameModeExt*: seq[MpaMode]
     samplesIn*: uint64
@@ -1986,6 +2022,7 @@ proc defaultMp3EncoderOptions*(bitrateKbps: int; sampleRateHz: uint32;
 
 proc newMp3Encoder*(opts: Mp3EncoderOptions): Mp3Encoder =
   initMpaTables()
+  initHuffCache()
   let sri = sampleRateIndex(opts.sampleRateHz)
   if sri.isNone:
     raise unsupportedError("mp3enc: unsupported sample rate")
@@ -2046,11 +2083,16 @@ proc assembleFrame*(e: Mp3Encoder; perChPcm: openArray[seq[float32]];
 
 proc tryAssembleFrames*(e: Mp3Encoder) =
   ## Cut whole frames while buffered PCM (+ lookahead when autoBlock).
+  ## Queue consumption is cursor-based: slicing the tail off per frame
+  ## is O(n^2) over a stream, so frames advance `pendingOff` and the
+  ## consumed prefix is dropped in bulk every 64k samples (amortized
+  ## O(1) per frame).
+  const CompactAt = 65536
   let lookPad = if e.opts.autoBlock: 576 else: 0
   while true:
     var ok = true
     for ch in 0 ..< e.nch:
-      if e.pending[ch].len < e.samplesPerFrame + lookPad:
+      if e.pending[ch].len - e.pendingOff[ch] < e.samplesPerFrame + lookPad:
         ok = false
         break
     if not ok:
@@ -2058,11 +2100,15 @@ proc tryAssembleFrames*(e: Mp3Encoder) =
     var perCh = newSeq[seq[float32]](e.nch)
     var look = newSeq[seq[float32]](e.nch)
     for ch in 0 ..< e.nch:
-      perCh[ch] = e.pending[ch][0 ..< e.samplesPerFrame]
+      let off = e.pendingOff[ch]
+      perCh[ch] = e.pending[ch][off ..< off + e.samplesPerFrame]
       if lookPad > 0:
-        look[ch] = e.pending[ch][e.samplesPerFrame ..<
-          e.samplesPerFrame + lookPad]
-      e.pending[ch] = e.pending[ch][e.samplesPerFrame .. ^1]
+        look[ch] = e.pending[ch][off + e.samplesPerFrame ..<
+          off + e.samplesPerFrame + lookPad]
+      e.pendingOff[ch] = off + e.samplesPerFrame
+      if e.pendingOff[ch] >= CompactAt:
+        e.pending[ch] = e.pending[ch][e.pendingOff[ch] .. ^1]
+        e.pendingOff[ch] = 0
     e.assembleFrame(perCh, look)
 
 proc pushSamplesI16*(e: Mp3Encoder; samples: openArray[int16]) =
@@ -2548,21 +2594,22 @@ proc finishEncoder*(e: Mp3Encoder): seq[uint8] =
         e.frames.len.uint64 * e.samplesPerFrame.uint64
     else: 0'u64
   for ch in 0 ..< e.nch:
-    while e.pending[ch].len.uint64 < wantPending:
+    while (e.pending[ch].len - e.pendingOff[ch]).uint64 < wantPending:
       e.pending[ch].add(0.0)
   # Assemble remaining whole frames (zero lookahead at stream end).
   while true:
     var ok = true
     for ch in 0 ..< e.nch:
-      if e.pending[ch].len < e.samplesPerFrame:
+      if e.pending[ch].len - e.pendingOff[ch] < e.samplesPerFrame:
         ok = false
         break
     if not ok:
       break
     var perCh = newSeq[seq[float32]](e.nch)
     for ch in 0 ..< e.nch:
-      perCh[ch] = e.pending[ch][0 ..< e.samplesPerFrame]
-      e.pending[ch] = e.pending[ch][e.samplesPerFrame .. ^1]
+      let off = e.pendingOff[ch]
+      perCh[ch] = e.pending[ch][off ..< off + e.samplesPerFrame]
+      e.pendingOff[ch] = off + e.samplesPerFrame
     e.assembleFrame(perCh, @[])
   # CBR Bresenham padding + slots.
   let siLen = if e.lsf:
