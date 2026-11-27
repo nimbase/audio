@@ -1,6 +1,7 @@
 <p align="center">
   Pure-Nim audio encoders and decoders, no C bindings.<br>
-  Decode and encode WAV/PCM/ADPCM, FLAC, Vorbis, MP3, AAC, ALAC, AIFF, CAF, MKV/WebM.
+  Decode WAV/PCM/ADPCM, FLAC, Vorbis, MP3, AAC, ALAC, AIFF, CAF, MKV/WebM —
+  and encode WAV/PCM/ADPCM, FLAC, MP3, AAC-LC.
 </p>
 
 <p align="center">
@@ -62,7 +63,9 @@ Codec support (`o` = decode, `w` = encode):
   spreading, TMN/NMT, flatness tonality) + quality presets, CBR/VBR, Xing/Info + LAME gapless tag, CRC-16,
   all nine sample rates; decoded output verified sample-exact
   (gapless) and within black-box tolerance on fixtures
-- AAC: o — AAC-LC decoder (Huffman, TNS, KBD/sine IMDCT filterbank)
+- AAC: o+w — AAC-LC decoder (Huffman, TNS, KBD/sine IMDCT filterbank)
+  + LC encoder (long-only signal path: forward MDCT, §4.6.2 quantizer,
+  books 1–11, greedy sectioning; rate loop, M/S, TNS land later)
   + ISOMP4 demuxer (stbl sample tables, esds ASC, seek); matches
   ffmpeg within 2 LSB past the 1024-sample priming
 - ALAC: o — Apple Lossless decoder (Rice history/zero-run, LPC with
@@ -176,6 +179,18 @@ let e = newMp3EncoderJointAuto(128, 44_100) # per-frame MS/LR picker
 e.enableXingInfo()
 e.pushSamplesI16(toS16Interleaved(buf))
 let msbytes = e.finishEncoder()
+```
+
+### AAC encode
+
+```nim
+import std/options
+import audio
+
+var buf = newAudioSamples(sfS16, newAudioSpec(44_100, ChStereo), 4096)
+# ... fill buf ...
+let aacbytes = encodeAacStream(buf,
+  defaultAacEncoderOptions(44_100, 2)) # complete .aac ADTS stream
 ```
 
 ### AAC decode (MP4)
@@ -346,6 +361,9 @@ if probeWav(bytes) == 255:
 - [oxideav-mp3](https://github.com/OxideAV/oxideav-mp3): reference for
   the MP3 encoder (intensity stereo, Model-2 psychoacoustics,
   outer loop).
+- [oxideav-aac](https://github.com/OxideAV/oxideav-aac): reference for
+  the AAC-LC encoder (forward MDCT, §4.6.2 quantizer, masking-spread
+  scalefactors, Table 4.95 codebooks, sectioning).
 
 ### ❤ Contributions & Support
 - 🐛 Found a bug? [Create a new Issue](https://github.com/nimbase/audio/issues)

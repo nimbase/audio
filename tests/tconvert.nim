@@ -241,9 +241,9 @@ suite "haus wav conversion":
     echo "haus mp3 psnr=", psnr
     check psnr > 25.0
 
-  test "aac converts structurally until step C":
-    # Skeleton emits silence; the content gate arrives with the
-    # Step C signal path. Structural gates only here.
+  test "aac converts music content (step C signal path)":
+    # Long-only signal path: hops plus the flush frame, and the
+    # decoded music must carry real energy (not skeleton silence).
     let src = windowS16Mapped()
     let bytes = encodeAacStream(src,
       defaultAacEncoderOptions(44_100, 2))
@@ -252,9 +252,16 @@ suite "haus wav conversion":
     let dec = newAacDecoder(w.tracks[0].codec,
       AudioDecoderOptions(gapless: true, verify: false))
     var frames = 0
+    var energy = 0.0
     while true:
       let pkt = w.nextPacket()
       if pkt.isNone:
         break
-      frames += dec.decodePacket(pkt.get).framesOf()
-    check frames == ((WinFrames + 1023) div 1024) * 1024
+      let s = dec.decodePacket(pkt.get)
+      frames += s.framesOf()
+      for c in 0 ..< 2:
+        for i in 0 ..< s.framesOf():
+          energy += s.f32.planes[c][i].float64 *
+            s.f32.planes[c][i].float64
+    check frames == ((WinFrames + 1023) div 1024 + 1) * 1024
+    check energy > 0.0

@@ -487,7 +487,7 @@ suite "adts framing":
       raisedCfg = true
     check raisedCfg
 
-suite "aac encoder skeleton":
+suite "aac encoder signal path":
   proc toneS16(n: int; stereo: bool): AudioSamples =
     let spec = newAudioSpec(44_100,
       if stereo: ChStereo else: positioned(PosFrontCenter))
@@ -498,12 +498,17 @@ suite "aac encoder skeleton":
       if stereo:
         result.s16.planes[1][i] = (0.4 * 32767.0 *
           sin(2.0 * PI * 660.0 * i.float / 44100.0)).int16
+    result.s16.numFrames = n
 
-  proc decodeAllZero(bytes: seq[uint8]; nch: int): int =
+  proc toneFreq(ch, i: int; stereo: bool): float64 =
+    let f = if stereo and ch == 1: 660.0 else: 440.0
+    (0.4 * 32767.0 * sin(2.0 * PI * f * i.float / 44100.0)) / 32768.0
+
+  proc decodeAllAacF32(bytes: seq[uint8]; nch: int): seq[seq[float32]] =
     let w = openAac(bytes)
     let dec = newAacDecoder(w.tracks[0].codec,
       AudioDecoderOptions(gapless: true, verify: false))
-    var frames = 0
+    result = newSeq[seq[float32]](nch)
     while true:
       let pkt = w.nextPacket()
       if pkt.isNone:
@@ -512,38 +517,62 @@ suite "aac encoder skeleton":
       check got.framesOf() == 1024
       for c in 0 ..< nch:
         for i in 0 ..< 1024:
-          if got.f32.planes[c][i] != 0.0:
-            checkpoint("nonzero at ch=" & $c & " i=" & $i)
-            check false
-      inc frames
-    frames
+          result[c].add(got.f32.planes[c][i])
 
-  test "silent blocks have exact byte sizes":
-    check aacSilentRawBlock(1).len == 4
-    check aacSilentRawBlock(2).len == 7
-    var raised = false
-    try:
-      discard aacSilentRawBlock(3)
-    except AudioError as e:
-      check e.kind == ekUnsupported
-      raised = true
-    check raised
+  proc snrAfterPriming(bytes: seq[uint8]; n, nch: int;
+      stereo: bool): tuple[snr, maxErr: float64] =
+    ## Skips the first (priming) frame, compares the rest with the
+    ## input tone. One flush frame trails the content.
+    let got = decodeAllAacF32(bytes, nch)
+    check got[0].len == n + 1024
+    var se = 0.0
+    var sig = 0.0
+    var maxErr = 0.0
+    for c in 0 ..< nch:
+      for i in 0 ..< n:
+        let a = toneFreq(c, i, stereo)
+        let d = got[c][1024 + i].float64 - a
+        se += d * d
+        sig += a * a
+        maxErr = max(maxErr, abs(d))
+    (10.0 * log10(sig / max(se, 1e-18)), maxErr)
 
-  test "stereo silence roundtrips to exact zeros":
-    let bytes = encodeAacStream(toneS16(3 * 1024, true),
+  test "silence codes to exact zeros, hops plus flush":
+    var sil = newAudioSamples(sfS16, newAudioSpec(44_100, ChStereo),
+      3 * 1024)
+    sil.s16.numFrames = 3 * 1024
+    let bytes = encodeAacStream(sil, defaultAacEncoderOptions(44_100, 2))
+    check probeAac(bytes) == 255
+    let got = decodeAllAacF32(bytes, 2)
+    check got[0].len == 4 * 1024
+    for c in 0 ..< 2:
+      for v in got[c]:
+        check v == 0.0
+
+  test "mono tone roundtrip clears snr gate":
+    let bytes = encodeAacStream(toneS16(4 * 1024, false),
+      defaultAacEncoderOptions(44_100, 1))
+    check probeAac(bytes) == 255
+    let (snr, maxErr) = snrAfterPriming(bytes, 4 * 1024, 1, false)
+    echo "aac mono tone snr=", snr, " maxErr=", maxErr
+    check snr > 30.0
+    check maxErr < 0.05
+
+  test "stereo tone roundtrip clears snr gate":
+    let bytes = encodeAacStream(toneS16(4 * 1024, true),
       defaultAacEncoderOptions(44_100, 2))
     check probeAac(bytes) == 255
-    check bytes.len == 3 * (7 + 7)
-    check decodeAllZero(bytes, 2) == 3
+    let (snr, maxErr) = snrAfterPriming(bytes, 4 * 1024, 2, true)
+    echo "aac stereo tone snr=", snr, " maxErr=", maxErr
+    check snr > 30.0
+    check maxErr < 0.05
 
-  test "mono silence roundtrips, tail pads to 1024":
-    let bytes = encodeAacStream(toneS16(2 * 1024, false),
-      defaultAacEncoderOptions(44_100, 1))
-    check bytes.len == 2 * (7 + 4)
-    check decodeAllZero(bytes, 1) == 2
-    let tail = encodeAacStream(toneS16(1500, false),
+  test "tail pads to 1024, self-decodes":
+    let t = encodeAacStream(toneS16(1500, false),
       defaultAacEncoderOptions(48_000, 1))
-    check decodeAllZero(tail, 1) == 2
+    check probeAac(t) == 255
+    # 1500 samples = 2 hops + flush frame.
+    check decodeAllAacF32(t, 1)[0].len == 3 * 1024
 
   test "hostile configs raise cleanly, empty stays empty":
     for (rate, ch) in [(44101'u32, 2), (0'u32, 2), (44_100'u32, 3),

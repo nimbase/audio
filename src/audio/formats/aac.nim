@@ -154,7 +154,7 @@ proc adtsRateIdxOf*(rate: uint32): uint8 =
 
 proc encodeAacStream*(samples: AudioSamples;
     opts: AacEncoderOptions): seq[uint8] =
-  ## Whole-stream AAC-LC encode (Step B: silent frames) as ADTS.
+  ## Whole-stream AAC-LC encode (Step C: long-only signal path) as ADTS.
   ## Requires `sfS16` input with `opts.channels` channels.
   if samples.format != sfS16:
     raise unsupportedError("aacenc: only s16 input supported")
