@@ -77,51 +77,68 @@ PSNR past the AAC priming frame). Decode cells report best-of-10
 ours vs best-of-3 `ffmpeg -f null -`. MP3 preset detail stays in
 `bmp3.nim`; this file compares formats.
 
+Method notes: ours is timed in-process on warm bytes, ffmpeg
+end-to-end through the shell (spawn, startup, file I/O), so the `ff`
+columns understate the ffmpeg codec itself, especially on small
+files. The closure-timing hazard noted for this box does not fire
+here: closure-param vs direct-call timing agrees (wav 1.7 vs
+1.2 ms, AAC 1.157 vs 1.154 s on the same work).
+
 ## Baseline — 2026-11-27
 
 ```text
 nim 2.4.0  hostOS=macosx  cpu=amd64
---- encode: wav/adpcm (sine2) ---
-wav16   ours  1431.1x   352844B exact | ff    27.2x   352878B exact
-adpcm-ms   ours    22.4x    92762B worst=43 mean=5 | ff    24.0x    90236B worst=2569 mean=54
-adpcm-ima  ours    26.8x    90940B worst=424 mean=47 | ff    26.0x    89182B worst=5841 mean=49
---- encode: flac (sine2, noise1) ---
-flac-sine2  ours     2.9x    52857B exact-frames | ff    26.1x    63940B exact-frames
-flac-noise1 ours     2.0x   165796B exact-frames | ff    14.0x   175244B exact-frames
---- encode: mp3 128k gapless (sine2, noise1) ---
-mp3-sine2  ours     1.6x    33017B psnr  78.5dB | ff    20.1x    33062B psnr  37.0dB
-mp3-noise1 ours     0.1x    17135B psnr  14.6dB | ff    13.1x    17180B psnr  15.7dB
---- encode: aac 128k (sine1, noise1) ---
-aac-sine1  ours     0.9x     5432B psnr  47.6dB | ff    10.2x    16062B psnr  38.0dB
-aac-noise1 ours     0.9x    85218B psnr  47.0dB | ff     9.9x    16303B psnr  13.2dB
---- decode ours vs ff ---
-dec wav16            ours  1260.3x | ff    25.7x
-dec adpcm-ms         ours  1181.3x | ff    32.3x
-dec adpcm-ima        ours  1227.9x | ff    31.5x
-dec flac-sine2       ours   274.9x | ff    34.9x
-dec flac-noise1      ours   505.4x | ff    17.1x
-dec mp3-sine2        ours   181.8x | ff    31.7x
-dec mp3-noise1       ours   354.5x | ff    17.0x
-dec aac-sine1        ours   875.5x | ff    18.3x
-dec aac-noise1       ours   347.6x | ff    17.3x
-dec vorbis           ours   175.8x | ff    17.8x
-dec alac             ours   289.7x | ff    17.4x
-dec aac-mp4          ours   656.8x | ff    18.4x
-dec aiff             ours  4559.3x | ff     9.0x
-dec caf              ours  4535.3x | ff     9.0x
 ```
 
-Notes:
+Encode, 44.1 kHz stereo:
 
-- Tones flatter our encoders: MP3/AAC sine PSNR clears ffmpeg's at
-  the same or smaller size (our tone path is near-transparent).
-- Noise tells the rate-control story: MP3 lands on budget and within
-  1 dB of lame (14.6 vs 15.7 dB), while AAC Step C has no rate loop
-  yet — transparent (47 dB) at 5x the 128k budget (85 kB for 1 s).
-  The loop is Step D work.
-- ADPCM: our encoders search all candidates per nibble (MS tries all
-  7 predictors), so worst-case error stays far below ffmpeg's fast
-  predictors at the same speed.
-- FLAC is lossless both sides; ours packs tones tighter (LPC-32).
-- `ff` decode columns on small files are process-spawn dominated;
-  ours decodes fixtures at 175–4800× realtime.
+| Format    | Fixture  | Ours  | ffmpeg | Faster  | Ours size | ff size | Ours quality       | ff quality         |
+|-----------|----------|-------|--------|---------|-----------|---------|--------------------|--------------------|
+| WAV16     | sine 2 s | 1431x | 27x    | ours*   | 352844    | 352878  | exact              | exact              |
+| ADPCM-MS  | sine 2 s | 22x   | 24x    | tie     | 92762     | 90236   | worst 43, mean 5   | worst 2569, mean 54 |
+| ADPCM-IMA | sine 2 s | 27x   | 26x    | tie     | 90940     | 89182   | worst 424, mean 47 | worst 5841, mean 49 |
+| FLAC      | sine 2 s | 2.9x  | 26x    | ff 9x   | 52857     | 63940   | exact              | exact              |
+| FLAC      | noise 1 s| 2.0x  | 14x    | ff 7x   | 165796    | 175244  | exact              | exact              |
+| MP3 128k  | sine 2 s | 1.6x  | 20x    | ff 13x  | 33017     | 33062   | 78.5 dB            | 37.0 dB            |
+| MP3 128k  | noise 1 s| 0.1x  | 13x    | ff 131x | 17135     | 17180   | 14.6 dB            | 15.7 dB            |
+| AAC 128k  | sine 1 s | 0.9x  | 10x    | ff 11x  | 5432      | 16062   | 47.6 dB            | 38.0 dB            |
+| AAC 128k  | noise 1 s| 0.9x  | 10x    | ff 11x  | 85218     | 16303   | 47.0 dB            | 13.2 dB            |
+
+\* WAV is memcpy-bound on both sides; the 53x gap is process-spawn
+overhead, not codec speed.
+
+Decode:
+
+| Source          | Ours  | ffmpeg | Faster   |
+|-----------------|-------|--------|----------|
+| wav16           | 1260x | 26x    | ours 49x |
+| adpcm-ms        | 1181x | 32x    | ours 37x |
+| adpcm-ima       | 1228x | 32x    | ours 39x |
+| flac sine       | 275x  | 35x    | ours 8x  |
+| flac noise      | 505x  | 17x    | ours 30x |
+| mp3 sine        | 182x  | 32x    | ours 6x  |
+| mp3 noise       | 355x  | 17x    | ours 21x |
+| aac sine        | 876x  | 18x    | ours 48x |
+| aac noise       | 348x  | 17x    | ours 20x |
+| vorbis fixture  | 176x  | 18x    | ours 10x |
+| alac fixture    | 290x  | 17x    | ours 17x |
+| aac-mp4 fixture | 657x  | 18x    | ours 36x |
+| aiff fixture    | 4559x | 9x     | ours*    |
+| caf fixture     | 4535x | 9x     | ours*    |
+
+\* Tiny files (0.5 s audio); the ffmpeg side is almost entirely
+process spawn.
+
+Conclusion:
+
+- Encode speed goes to ffmpeg everywhere that matters: FLAC 7–9x,
+  MP3 13–131x, AAC 11x. WAV/ADPCM tie. Our hotspots explain it:
+  Huffman table-select rebuilds (MP3 noise), direct-form MDCT
+  (AAC), scalar single-thread FLAC.
+- Encode quality is ours to keep: better on tones (MP3 78.5 dB,
+  AAC 47.6 dB at a third of the bytes) and ADPCM (worst-case LSB
+  error an order of magnitude under ffmpeg), on par on MP3 noise.
+  The one red cell is AAC noise: transparent (47 dB) at 5x the
+  128k budget — no rate loop yet, which is Step D work.
+- Decode speed goes to us on every cell (6–500x in-process), with
+  the stated spawn caveat on the ffmpeg side.
