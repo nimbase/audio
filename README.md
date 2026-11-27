@@ -322,13 +322,19 @@ if probeWav(bytes) == 255:
 - [x] Benchmarks (`benchmarks/bmp3.nim` + recorded baselines) and
   SIMD window kernels (SSE2 via `nimsimd`, scalar fallback,
   `-d:vecScalar`)
-- [ ] Later: WavPack unsupported stub (tested + documented),
-  encoders for the decode-only codecs (Vorbis, AAC, ALAC) plus
-  AIFF/CAF muxers, pure-Nim Opus + HE-AAC ports (fixture/matrix
-  validation), streaming I/O for the remaining formats,
-  encoder-side perf (Huffman table-select hotspot behind the
-  ~0.1x noise encode, Bark/MDCT SIMD), further decode kernels
-  (dct32, imdct36) if profiling justifies them
+- [ ] Later:
+  - WavPack unsupported stub (tested + documented)
+  - Vorbis encoder
+  - AAC encoder
+  - ALAC encoder
+  - AIFF muxer
+  - CAF muxer
+  - Pure-Nim Opus + HE-AAC ports (fixture/matrix validation)
+  - Streaming I/O for the remaining formats
+  - Encoder-side perf (Huffman table-select hotspot behind the
+    ~0.1x noise encode, Bark/MDCT SIMD)
+  - Further decode kernels (dct32, imdct36) if profiling
+    justifies them
 
 ### ❤ Credits
 
